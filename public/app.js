@@ -96,7 +96,9 @@ function refreshLink() {
 async function loadHealth() {
   const pill = $("#statusPill");
   try {
-    const h = await (await fetch("/api/health")).json();
+    const r = await fetch("/api/health?op=health");
+    const h = await r.json();
+    if (!r.ok) throw new Error(h.error || `HTTP ${r.status}`);
     state.health = h;
     pill.className = "status-pill " + (h.anthropic_key ? "ok" : "warn");
     $("#statusText").textContent = h.anthropic_key ? "Claude ready" : "AI key missing";
@@ -105,10 +107,10 @@ async function loadHealth() {
       Anthropic key: ${h.anthropic_key ? "configured" : "<b>missing</b> — add ANTHROPIC_API_KEY in Vercel"}<br>
       App password: ${h.password_required ? "required" : "not set (anyone with the link can run extractions)"}<br>
       SGX token: ${h.sgx_token ? "configured" : "not set (only needed if SGX refuses requests)"}</div>`;
-  } catch {
+  } catch (e) {
     pill.className = "status-pill warn";
     $("#statusText").textContent = "Server offline";
-    $("#serverInfo").textContent = "The API isn’t reachable.";
+    $("#serverInfo").textContent = `The API isn’t reachable: ${e.message || e}`;
   }
 }
 
@@ -193,7 +195,7 @@ async function screen(ev) {
   renderSkeleton();
   try {
     const q = new URLSearchParams({ url: pageUrl(), company: $("#company").value.trim() });
-    const res = await api(`/api/screen?${q}`);
+    const res = await api(`/api/screen?op=screen&${q}`);
     state.announcements = res.announcements;
     const m = res.page_url.match(/from=(\d{8}).*?to=(\d{8})/);
     const fmt = (s) => nice(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6)}`);
@@ -306,7 +308,7 @@ async function run(job, mode) {
   stage.innerHTML = `<p class="muted" style="margin:0">Downloading the filing from SGX and scanning every page for the three statements…</p>`;
   let scanRes;
   try {
-    scanRes = await api("/api/process", { method: "POST", body: formData(job, true, job.pages) });
+    scanRes = await api("/api/process?op=process", { method: "POST", body: formData(job, true, job.pages) });
   } catch (e) {
     setSteps(1, { failed: true, scanOnly });
     stage.innerHTML = `<div class="notice error">${icon("alert")}<div>${esc(e.message)}</div></div>`;
@@ -332,7 +334,7 @@ async function run(job, mode) {
   stage.insertAdjacentHTML("beforeend", `<div class="notice info" id="aiWait">${icon("sparkles")}<div>Claude is reading ${scanRes.pages.length} pages. This usually takes one to three minutes.</div></div>`);
   let res;
   try {
-    res = await api("/api/process", { method: "POST", body: formData(job, false, pages) });
+    res = await api("/api/process?op=process", { method: "POST", body: formData(job, false, pages) });
   } catch (e) {
     setSteps(2, { failed: true });
     $("#aiWait").outerHTML = `<div class="notice error">${icon("alert")}<div>${esc(e.message)}</div></div>`;

@@ -1,6 +1,6 @@
 """Vercel serverless entry point (Flask WSGI app).
 
-Routes
+Routes (the operation is also accepted as ?op=health|screen|process on any path)
   GET  /api/health                    configuration status
   GET  /api/screen?url=...&company=   list announcements for an SGX page URL
   POST /api/process                   scan (+ extract) one filing, return workbook
@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from flask import Flask, abort, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 
 from sgx_fin import extractor
 from sgx_fin.excel_writer import workbook_bytes
@@ -37,16 +37,6 @@ app.config["MAX_CONTENT_LENGTH"] = 4_400_000  # Vercel caps request bodies at 4.
 WORK = Path(tempfile.gettempdir()) / "sgx_fin"
 
 
-@app.before_request
-def _auth():
-    if not request.path.startswith("/api/") or request.path.endswith("/health"):
-        return None
-    pw = os.environ.get("APP_PASSWORD")
-    if pw and not hmac.compare_digest(request.headers.get("X-App-Password", ""), pw):
-        return jsonify(error="Wrong or missing password"), 401
-    return None
-
-
 @app.errorhandler(Exception)
 def _err(e):
     traceback.print_exc()
@@ -54,21 +44,42 @@ def _err(e):
     return jsonify(error=f"{type(e).__name__}: {e}"), code if isinstance(code, int) else 500
 
 
-# Vercel serves public/ from its CDN; these routes cover local runs (`flask --app api/index run`)
-# and any deployment where Flask receives the page request itself.
-@app.get("/")
-def home():
-    return send_from_directory(PUBLIC, "index.html")
+# One catch-all route instead of per-path routes: depending on how Vercel runs the function it
+# hands Flask the browser's path (/api/screen), the rewrite target (/api/index) or the path below
+# the function's mount (/screen). The front end therefore also names the operation in ?op=,
+# which survives every one of those.
+API: dict[str, tuple] = {}
 
 
-@app.get("/<path:name>")
-def static_file(name: str):
-    if name.startswith("api/") or not (PUBLIC / name).is_file():
-        abort(404)
-    return send_from_directory(PUBLIC, name)
+def api(name: str, method: str, public: bool = False):
+    def deco(fn):
+        API[name] = (fn, method, public)
+        return fn
+    return deco
 
 
-@app.get("/api/health")
+@app.route("/", defaults={"path": ""}, methods=["GET", "POST"])
+@app.route("/<path:path>", methods=["GET", "POST"])
+def dispatch(path: str):
+    op = request.args.get("op") or path.rstrip("/").rsplit("/", 1)[-1]
+    if op in API:
+        fn, method, public = API[op]
+        if request.method != method:
+            return jsonify(error=f"Use {method} for {op}"), 405
+        pw = os.environ.get("APP_PASSWORD")
+        if not public and pw and not hmac.compare_digest(request.headers.get("X-App-Password", ""), pw):
+            return jsonify(error="Wrong or missing password"), 401
+        return fn()
+    # Vercel serves public/ from its CDN; this covers local runs and deployments where Flask
+    # receives the page request itself.
+    if request.method == "GET" and not path.startswith("api"):
+        name = path or "index.html"
+        if (PUBLIC / name).is_file():
+            return send_from_directory(PUBLIC, name)
+    return jsonify(error=f"No route for {request.method} {request.path} (op={op or '-'})"), 404
+
+
+@api("health", "GET", public=True)
 def health():
     return jsonify(
         anthropic_key=bool(os.environ.get("ANTHROPIC_API_KEY")),
@@ -78,7 +89,7 @@ def health():
     )
 
 
-@app.get("/api/screen")
+@api("screen", "GET")
 def screen():
     url = request.args.get("url", "")
     if not url:
@@ -90,7 +101,7 @@ def screen():
          "url": a.url, "broadcast": a.broadcast, "category": a.category} for a in anns])
 
 
-@app.post("/api/process")
+@api("process", "POST")
 def process():
     f = request.form
     dry_run = f.get("dry_run") == "true"
