@@ -78,7 +78,18 @@ async function api(path, opts = {}) {
 }
 
 // ------------------------------------------------------------------ dates & screen URL
-const sgtToday = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+// Default screen, in Singapore time: on Saturday, Sunday and Monday, the weekend's Friday to Sunday;
+// on Tuesday to Friday, the day before.
+function defaultRange(now = Date.now()) {
+  const sgt = new Date(now + 8 * 3600e3); // read with getUTC* = Singapore calendar
+  const day = (offset) => new Date(sgt.getTime() + offset * 864e5).toISOString().slice(0, 10);
+  switch (sgt.getUTCDay()) {
+    case 6: return [day(-1), day(1)]; // Saturday: Fri – Sun
+    case 0: return [day(-2), day(0)]; // Sunday:   Fri – Sun
+    case 1: return [day(-3), day(-1)]; // Monday:   Fri – Sun
+    default: return [day(-1), day(-1)]; // Tue – Fri: the previous day
+  }
+}
 const compact = (d) => d.replaceAll("-", "");
 const nice = (d) => new Date(d + "T00:00:00").toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" });
 
@@ -133,7 +144,7 @@ function renderIntro() {
           <circle cx="206" cy="32" r="12" fill="#F2784B"/><path d="M200.5 32l3.8 3.8 7-7.6" fill="none" stroke="#141413" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <h3>Pick a date and screen SGX</h3>
-        <p>Results season is busiest from late January to March, May, August and November. Leave the company blank to see every financial statements announcement that day.</p>
+        <p>Results season is busiest from late January to March, May, August and November. The dates start on the last trading days: Friday to Sunday over a weekend, otherwise yesterday. Leave the company blank to see every financial statements announcement.</p>
       </div>
       <ol class="steps">
         <li><span class="badge">1</span><span><strong>Screen</strong> <span class="muted">— the same date and ANNC17 filter as the SGX announcements page.</span></span></li>
@@ -492,7 +503,7 @@ function clearMerge() {
 $("#wbClear").addEventListener("click", clearMerge);
 
 // ------------------------------------------------------------------ wiring
-$("#from").value = $("#to").value = sgtToday();
+[$("#from").value, $("#to").value] = defaultRange();
 ["from", "to", "sgxUrl"].forEach((id) => $(`#${id}`).addEventListener("input", refreshLink));
 $("#togglePaste").addEventListener("click", () => {
   const open = $("#pasteRow").classList.toggle("open");
