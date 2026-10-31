@@ -23,6 +23,7 @@ import hmac
 import os
 import re
 import sys
+import time
 import tempfile
 import traceback
 from pathlib import Path
@@ -132,6 +133,8 @@ def attachment_links():
 
 @api("process", "POST")
 def process():
+    started = time.monotonic()
+    deadline = started + 285  # Vercel stops the function at 300 s
     f = request.form
     dry_run = f.get("dry_run") == "true"
     pages = [int(x) for x in f.get("pages", "").replace(" ", "").split(",") if x] or None
@@ -188,10 +191,13 @@ def process():
                                   key=lambda x: -x["score"])[:5] for st in scan.selected},
         "attachments": names, "downloaded": downloaded, "used_url": used_url,
         "vision": scan.needs_vision,
+        "ai_locate": scan.needs_ai_locate,  # keywords missing: the AI finds the statements
+        "missing": scan.missing,
     }
+    timings = {"download_and_scan": round(time.monotonic() - started, 1)}
     chosen = pages or default_pages(scan)
     if dry_run or not chosen:
-        return jsonify(scan=scan_info, pages=chosen, extracted=False,
+        return jsonify(scan=scan_info, pages=chosen, extracted=False, timings=timings,
                        message=None if chosen else "No statement pages found; pass pages manually.")
 
     # 3. AI extraction on the selected pages only, then merge into the uploaded workbook (if any).
@@ -203,12 +209,14 @@ def process():
             f"This deployment ({where}) can't see GEMINI_API_KEY (AI variables it sees: {seen}). "
             "In Vercel open THIS project → Settings → Environment Variables, add GEMINI_API_KEY "
             f"with {where.title()} ticked, then Deployments → Redeploy.")), 500
+    ai_started = time.monotonic()
     res = process_pdf(pdf, scan=scan, pages=chosen, meta=meta,
-                      effort=f.get("effort", "high"), cache_dir=WORK)
+                      effort=f.get("effort", "high"), cache_dir=WORK, deadline=deadline)
+    timings["ai"] = round(time.monotonic() - ai_started, 1)
     existing = request.files["workbook"].read() if request.files.get("workbook") else None
     data, checks = workbook_bytes(existing, res.normalised, res.meta)
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", res.meta.get("stock_code") or res.meta.get("company_name") or "").strip("_") or "financials"
     return jsonify(
-        scan=scan_info, pages=chosen, extracted=True, meta=res.meta, usage=res.usage, checks=checks,
+        scan=scan_info, pages=chosen, extracted=True, meta=res.meta, usage=res.usage, checks=checks, timings=timings,
         filename=f"{name}.xlsx", workbook_b64=base64.b64encode(data).decode(),
     )

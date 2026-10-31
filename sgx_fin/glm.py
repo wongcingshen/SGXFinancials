@@ -19,6 +19,8 @@ import io
 import json
 import os
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pypdfium2 as pdfium
@@ -115,7 +117,10 @@ def render(pdf: Path, pages: list[int], long_side: int) -> list[str]:
 
 
 # ------------------------------------------------------------------ API
-def _post(model: str, system: str, content: list, json_mode: bool = True) -> tuple[str, dict]:
+def _post(model: str, system: str, content: list, json_mode: bool = True, deadline: float | None = None) -> tuple[str, dict]:
+    left = 240.0 if deadline is None else deadline - time.monotonic()
+    if left < 10:
+        raise GLMError(408, "out of time")
     body = {
         "model": model,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}],
@@ -126,7 +131,7 @@ def _post(model: str, system: str, content: list, json_mode: bool = True) -> tup
         body["response_format"] = {"type": "json_object"}
     r = requests.post(f"{base_url()}/chat/completions",
                       headers={"Authorization": f"Bearer {api_key()}", "Content-Type": "application/json"},
-                      json=body, timeout=240)
+                      json=body, timeout=min(240.0, left))
     if r.status_code >= 400:
         raise GLMError(r.status_code, r.text[:400])
     data = r.json()
@@ -143,13 +148,15 @@ class GLMError(RuntimeError):
         self.status = status
 
 
-def _call(model: str, system: str, content: list) -> tuple[dict, dict]:
+def _call(model: str, system: str, content: list, deadline: float | None = None) -> tuple[dict, dict]:
     try:
-        text, usage = _post(model, system, content)
+        text, usage = _post(model, system, content, deadline=deadline)
     except GLMError as e:
         if e.status != 400:
             raise
-        text, usage = _post(model, system, content, json_mode=False)  # if JSON mode isn't accepted
+        text, usage = _post(model, system, content, json_mode=False, deadline=deadline)  # no JSON mode
+    except requests.Timeout as e:
+        raise GLMError(408, "timed out") from e
     return parse_json(text), usage
 
 
@@ -188,7 +195,8 @@ LOCATE = ("Each image is one page of a company's results filing, numbered as lab
 
 
 # ------------------------------------------------------------------ extraction
-def extract(pdf: Path, pages: list[int], system: str, instruction: str) -> tuple[dict, str, dict]:
+def extract(pdf: Path, pages: list[int], system: str, instruction: str,
+            deadline: float | None = None) -> tuple[dict, str, dict]:
     """Read the statements from picture pages. Returns (data, model used, usage).
 
     `pages` are original page numbers; data[...]["page_numbers"] come back as 1-based positions in
@@ -197,32 +205,37 @@ def extract(pdf: Path, pages: list[int], system: str, instruction: str) -> tuple
     errors = []
     for model in models():
         try:
-            data, usage = _extract_with(model, pdf, pages, system, instruction)
+            data, usage = _extract_with(model, pdf, pages, system, instruction, deadline)
             return data, model, usage
         except GLMError as e:
             errors.append(f"{model}: {e}")
-            if e.status in (401, 403):
-                break  # bad key: other models won't help
+            if e.status in (401, 403, 408):
+                break  # bad key, or out of time: other models won't help
         except (ValueError, KeyError, TypeError) as e:
             errors.append(f"{model}: {e}")
     raise RuntimeError("; ".join(errors))
 
 
-def _extract_with(model: str, pdf: Path, pages: list[int], system: str, instruction: str) -> tuple[dict, dict]:
+def _extract_with(model: str, pdf: Path, pages: list[int], system: str, instruction: str,
+                  deadline: float | None = None) -> tuple[dict, dict]:
     limit = max_images()
     use = pages
     usage_total: dict = {}
     if len(pages) > limit:
-        # Skim small previews in batches to find the statement pages, then read only those.
+        # Skim small previews in batches (in parallel) to find the statement pages, then read only those.
+        batches = [pages[i:i + limit * 2] for i in range(0, len(pages), limit * 2)]
+
+        def skim(batch):
+            return batch, _call(model, system, _pages_content(render(pdf, batch, 900), LOCATE), deadline)
+
         found: set[int] = set()
-        for i in range(0, len(pages), limit * 2):
-            batch = pages[i:i + limit * 2]
-            hits, usage = _call(model, system, _pages_content(render(pdf, batch, 900), LOCATE))
-            _add(usage_total, usage)
-            for st in STATEMENTS:
-                found |= {batch[n - 1] for n in hits.get(st) or [] if isinstance(n, int) and 1 <= n <= len(batch)}
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for batch, (hits, usage) in pool.map(skim, batches):
+                _add(usage_total, usage)
+                for st in STATEMENTS:
+                    found |= {batch[n - 1] for n in hits.get(st) or [] if isinstance(n, int) and 1 <= n <= len(batch)}
         use = sorted(found)[:limit] or pages[:limit]
-    raw, usage = _call(model, system + "\n\n" + SKELETON, _pages_content(render(pdf, use, 1600), instruction))
+    raw, usage = _call(model, system + "\n\n" + SKELETON, _pages_content(render(pdf, use, 1600), instruction), deadline)
     _add(usage_total, usage)
     data = coerce(raw)
     for st in STATEMENTS:  # positions in `use` -> positions in `pages`

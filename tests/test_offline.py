@@ -239,7 +239,7 @@ def test_picture_filings_read_by_glm_on_nvidia():
         calls.clear()
         ex = extractor.extract(pic, list(range(1, 9)), cache_dir=out, vision=True)
         posts = [c for c in calls if c[0] == "POST"]
-        assert [c[3] for c in posts] == [6, 2, 3], posts  # 2 skim batches (6 + 2 pages), then 3 pages read
+        assert sorted(c[3] for c in posts[:2]) == [2, 6] and posts[2][3] == 3, posts  # 2 skims in parallel, then 3 read
         assert ex.data["income_statement"]["page_numbers"] == [4]  # page 4 of the 8 sent
 
         # GLM failing: Gemini takes over (no Gemini key here, so the error lists both).
@@ -256,6 +256,30 @@ def test_picture_filings_read_by_glm_on_nvidia():
             if v is not None:
                 os.environ[k] = v
         glm._listed.clear()
+
+
+def test_ai_finds_the_statements_when_keywords_are_missing():
+    from pathlib import Path as P
+    from sgx_fin.page_scanner import PageScore, ScanResult, score_page
+    from sgx_fin.pipeline import default_pages
+
+    def page(n, ratio, text=True):
+        return PageScore(n, {"income_statement": 0, "balance_sheet": 0, "cash_flow": 0}, ratio, text)
+
+    # 30 pages; only the balance sheet's words were found (p5). Pages 10-29 are number-heavy tables.
+    pages = [page(n, 0.4 if 10 <= n <= 29 else 0.05) for n in range(1, 31)]
+    scan = ScanResult(P("x.pdf"), 30, pages, {"income_statement": [], "balance_sheet": [5], "cash_flow": []}, [])
+    assert scan.needs_ai_locate and not scan.needs_vision and scan.missing == ["income_statement", "cash_flow"]
+    chosen = default_pages(scan)
+    assert chosen == [5] + list(range(10, 30))  # found page + number-heavy pages; narrative pages left out
+    short = ScanResult(P("y.pdf"), 6, pages[:6], {"income_statement": [], "balance_sheet": [], "cash_flow": []}, [])
+    assert default_pages(short) == [1, 2, 3, 4, 5, 6]  # a short document goes whole
+    assert "find the income statement" in extractor._instruction(P("y.pdf"), [1, 2], locate=True)
+
+    # Bank / Indian-format titles are recognised by the keyword scan.
+    assert score_page("STATEMENT OF STANDALONE AUDITED FINANCIAL RESULTS\nInterest earned 1,000 900\n"
+                      "Interest expended 600 500\nNet Profit 300 250", 1).title_hits.get("income_statement")
+    assert score_page("Statement of Assets and Liabilities\nDeposits 9,000\nAdvances 7,000", 1).title_hits.get("balance_sheet")
 
 
 def test_workbook_and_merge():

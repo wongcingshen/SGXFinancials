@@ -171,6 +171,7 @@ svg.i { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentCo
   animation: spin .8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+.elapsed { font-variant-numeric: tabular-nums; opacity: .75; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 18px; }
 

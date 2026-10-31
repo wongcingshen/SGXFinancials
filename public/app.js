@@ -70,9 +70,15 @@ function toast(msg) {
 
 async function api(path, opts = {}) {
   const headers = { "X-App-Password": store.get("sgxf-pw"), ...(opts.headers || {}) };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs || 330_000);
   let r;
-  try { r = await fetch(path, { ...opts, headers }); }
-  catch { throw new Error("Can’t reach the server. Check your connection and try again."); }
+  try { r = await fetch(path, { ...opts, headers, signal: ctrl.signal }); }
+  catch (e) {
+    throw new Error(e.name === "AbortError"
+      ? "No answer after 5 minutes (the server’s time limit). Try again: the PDF is kept, so the retry is faster. Or open the details and choose fewer pages."
+      : "Can’t reach the server. Check your connection and try again.");
+  } finally { clearTimeout(timer); }
   const body = await r.json().catch(() => ({ error: r.status === 504 ? "The server took too long (Vercel time limit). Try again; downloads are cached." : `HTTP ${r.status}` }));
   if (r.status === 401) throw Object.assign(new Error("Wrong or missing app password. Add it in Settings."), { auth: true });
   if (!r.ok) throw Object.assign(new Error(body.error || `HTTP ${r.status}`), { body, status: r.status });
@@ -178,7 +184,7 @@ function cardHtml(a, i) {
   const fail = j.result ? j.result.checks.filter((c) => c.status === "FAIL").length : 0;
   const pill = j.status === "done" ? `${icon("check", "width:14px;height:14px")}Excel ready`
     : j.status === "failed" ? `${icon("alert", "width:14px;height:14px")}Failed`
-    : busy ? `<span class="spin" aria-hidden="true"></span>${esc(label)}`
+    : busy ? `<span class="spin" aria-hidden="true"></span>${esc(label)}${j.since ? ` <span class="elapsed" data-since="${j.since}">${clock(j.since)}</span>` : ""}`
     : `<span class="dot"></span>${esc(when(a.broadcast) || "SGX")}`;
   const action = j.status === "done"
     ? `<a class="btn btn-ember" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Excel</a>`
@@ -229,6 +235,12 @@ function renderCard(item) {
   renderBulk();
   if ($("#runSheet").open && $("#runSheet").dataset.key === item.key) showDetails(item);
 }
+
+const clock = (since) => {
+  const s = Math.max(0, Math.round((Date.now() - since) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+setInterval(() => document.querySelectorAll(".elapsed").forEach((el) => { el.textContent = clock(+el.dataset.since); }), 1000);
 
 // The main action: Extract all → Stop while running → Download all once workbooks exist.
 function renderBulk() {
@@ -354,11 +366,11 @@ async function saveToFolder(name, blob) {
 }
 
 // ------------------------------------------------------------------ extraction
-function formData(a, dryRun, pages, workbook) {
+function formData(a, dryRun, pages, workbook, files) {
   const fd = new FormData();
   if (a.url && !a.file) fd.append("announcement_url", a.url);
   for (const [k, v] of [["issuer", a.issuer], ["stock_code", a.stock_code], ["title", a.title]]) if (v) fd.append(k, v);
-  for (const f of a.attachments || []) { fd.append("pdf_url", f.url); fd.append("pdf_name", f.name || ""); }
+  for (const f of files || a.attachments || []) { fd.append("pdf_url", f.url); fd.append("pdf_name", f.name || ""); }
   if (a.file) fd.append("pdf", a.file);
   fd.append("dry_run", dryRun ? "true" : "false");
   fd.append("effort", state.effort);
@@ -370,7 +382,7 @@ function formData(a, dryRun, pages, workbook) {
 /** Download → keyword scan → AI → workbook for one card. Progress is shown on the card. */
 async function extract(a, { pages } = {}) {
   const j = a.job;
-  Object.assign(j, { status: "reading", error: "", scan: null, result: null });
+  Object.assign(j, { status: "reading", error: "", scan: null, result: null, since: Date.now(), started: Date.now() });
   renderCard(a);
   try {
     let scanRes;
@@ -388,17 +400,21 @@ async function extract(a, { pages } = {}) {
     if (!scanRes.pages.length) throw new Error("The keyword scan found no statement pages. Open the details to choose pages.");
     j.ai = scanRes.scan.vision && state.health?.photo_model ? "GLM" : state.ai; // picture filings go to GLM first
     j.status = "ai";
+    j.since = Date.now();
     renderCard(a);
     // With a download folder, merge into this company's workbook if it is already there.
     const name = a.stock_code || a.issuer ? workbookName(a) : null;
     const existing = state.folderOk && name && !state.mergeFile ? await readFromFolder(name) : null;
-    const res = await api("/api/process?op=process", { method: "POST", body: formData(a, false, scanRes.pages.join(","), existing) });
+    // Only the PDF the scan chose: the server needn't download the other attachments again.
+    const chosen = scanRes.scan.used_url && a.attachments?.filter((f) => f.url === scanRes.scan.used_url);
+    const res = await api("/api/process?op=process", { method: "POST", body: formData(a, false, scanRes.pages.join(","), existing, chosen?.length ? chosen : null) });
     if (state.mergeFile) clearMerge();
     const blob = new Blob([Uint8Array.from(atob(res.workbook_b64), (c) => c.charCodeAt(0))],
       { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     if (j.blobUrl) URL.revokeObjectURL(j.blobUrl);
     const filename = name || res.filename;
-    Object.assign(j, { status: "done", result: res, blob, blobUrl: URL.createObjectURL(blob), filename, merged: Boolean(existing), saved: false });
+    Object.assign(j, { status: "done", result: res, blob, blobUrl: URL.createObjectURL(blob), filename, merged: Boolean(existing), saved: false,
+      seconds: Math.round((Date.now() - j.started) / 1000) });
     if (state.folderOk) {
       try { await saveToFolder(filename, blob); j.saved = true; }
       catch (e) { j.saveError = e.message || String(e); }
@@ -480,7 +496,8 @@ function scanHtml(scan, pages) {
     return `<div class="stmt ${s.cls}"><span class="ico">${icon(s.icon)}</span>
       <span class="nm">${s.name}<small>${sel.length ? `keyword score ${top ? Math.round(top.score) : "–"}` : "no page scored high enough"}</small></span>
       <span class="chips">${sel.length ? sel.map((p) => `<span class="chip">p${p}</span>`).join("")
-        : scan.vision ? `<span class="chip">in the pictures</span>` : `<span class="chip missing">not found</span>`}</span></div>`;
+        : scan.vision ? `<span class="chip">in the pictures</span>`
+        : scan.ai_locate ? `<span class="chip">${esc(state.ai)} finds it</span>` : `<span class="chip missing">not found</span>`}</span></div>`;
   }).join("");
   const strip = scan.page_count <= 400
     ? `<div class="pm" aria-label="Page map">${Array.from({ length: scan.page_count }, (_, i) => {
@@ -497,6 +514,9 @@ function scanHtml(scan, pages) {
       <p class="muted" style="margin:10px 0 0;font-size:13px">${esc(scan.pdf)} · ${scan.page_count} pages${scan.attachments.length > 1 ? ` · the financial statements PDF of ${scan.attachments.length} attachments (${scan.downloaded.length} opened)` : ""}${
         pages?.length ? ` · ${pages.length} page${pages.length === 1 ? "" : "s"} go to ${esc(state.ai)}` : ""}</p>
     </div>
+    ${scan.ai_locate ? `<div class="notice info">${icon("sparkles")}<div>The keyword scan didn’t find the deciding words for ${
+        scan.missing.map((k) => STATEMENTS.find((x) => x.key === k).name.toLowerCase()).join(", ")}, so ${pages?.length || "the"} page${pages?.length === 1 ? "" : "s"} (${
+        pages?.length === scan.page_count ? "the whole document" : "what was found plus the most number-heavy pages"}) go to ${esc(state.ai)}, which finds the three statements itself.</div></div>` : ""}
     ${scan.vision
       ? `<div class="notice info">${icon("eye")}<div>This filing’s statements are pictures (scanned or photographed), which a keyword scan can’t read. Its ${img.size} picture page${img.size === 1 ? "" : "s"} go to ${esc(state.health?.photo_model || state.ai)}${
         state.health?.photo_model ? ` (${esc(state.ai)} if that fails)` : ""}, which finds the statements and reads them from the images.</div></div>`
@@ -511,7 +531,8 @@ function resultHtml(r) {
   return `<div>
       <p class="block-title">Extracted</p>
       <div class="kv"><span><b>${esc(nameCase(r.meta.company_name))}</b></span><span>${esc(r.meta.currency)} · ${esc(r.meta.basis || "Group")}</span>
-        <span>pages ${esc(r.meta.pages)}</span><span>${r.usage?.input_tokens ? `${r.usage.input_tokens.toLocaleString()} in / ${r.usage.output_tokens.toLocaleString()} out tokens` : "from cache, no tokens used"}</span></div>
+        <span>pages ${esc(r.meta.pages)}</span><span>${r.usage?.input_tokens ? `${r.usage.input_tokens.toLocaleString()} in / ${(r.usage.output_tokens || 0).toLocaleString()} out tokens` : "from cache, no tokens used"}</span>
+        <span>read by ${esc(r.meta.model || "")}</span>${r.timings ? `<span>download &amp; scan ${r.timings.download_and_scan} s · AI ${r.timings.ai} s</span>` : ""}</div>
     </div>
     <div>
       <p class="block-title">Tie-out checks</p>
@@ -523,7 +544,7 @@ function resultHtml(r) {
           <span class="tag ${c.status === "PASS" ? "pass" : c.status === "FAIL" ? "fail" : "na"}">${c.status === "n/a" ? "n/a" : c.status.toLowerCase()}</span></div>`).join("")}</div>
       </details>
     </div>
-    ${r.meta.vision && r.meta.found_pages ? `<div class="kv">${STATEMENTS.map((s) => `<span>${s.name}: <b>${
+    ${(r.meta.vision || r.meta.located_by_ai) && r.meta.found_pages ? `<div class="kv">${STATEMENTS.map((s) => `<span>${s.name}: <b>${
       (r.meta.found_pages[s.key] || []).map((p) => `p${p}`).join(", ") || "not found"}</b></span>`).join("")}</div>` : ""}
     ${r.meta.notes ? `<div class="notice info">${icon("sparkles")}<div><b>${esc(state.ai)}’s notes</b><br>${esc(r.meta.notes)}</div></div>` : ""}`;
 }
@@ -536,8 +557,8 @@ function showDetails(a) {
   $("#runEyebrow").textContent = [a.stock_code, when(a.broadcast, true)].filter(Boolean).join(" · ") || "Filing";
   $("#runTitle").textContent = nameCase(a.issuer) || a.fileName || "SGX filing";
   $("#runSub").textContent = shortTitle(a.title);
-  const scan = j.result || j.scan;
-  const pages = scan?.pages?.join(",") || "";
+  const scan = j.scan || j.result; // the scan step saw every attachment; the AI step only the chosen one
+  const pages = (j.result || j.scan)?.pages?.join(",") || "";
   $("#runBody").innerHTML = `${stepsHtml(j)}<div class="stage">
     ${filesLine(a) ? `<div>${filesLine(a)}</div>` : ""}
     ${scan ? scanHtml(scan.scan, scan.pages) : ""}

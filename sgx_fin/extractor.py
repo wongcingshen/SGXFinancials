@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -175,7 +176,12 @@ def excerpt_pdf(pdf: Path, pages: list[int]) -> bytes:
     return buf.getvalue()
 
 
-def _instruction(pdf: Path, pages: list[int], vision: bool = False) -> str:
+def _instruction(pdf: Path, pages: list[int], vision: bool = False, locate: bool = False) -> str:
+    if locate and not vision:
+        return (f"These {len(pages)} pages (original pages {pages} of {pdf.name}) may contain more than the "
+                "statements: find the income statement, balance sheet and cash flow statement among them "
+                "(the Group's primary statements; ignore commentary, notes, segment and ratio tables), give "
+                "each statement's page_numbers, and fill the template. Leave out any statement that isn't there.")
     if vision:
         return (f"These {len(pages)} pages (original pages {pages} of {pdf.name}) include scanned or "
                 "photographed pages, so read them visually. They contain more than the statements: find the "
@@ -187,17 +193,22 @@ def _instruction(pdf: Path, pages: list[int], vision: bool = False) -> str:
 
 
 def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str = "high",
-            cache_dir: Path | None = None, client=None, vision: bool = False) -> Extraction:
+            cache_dir: Path | None = None, client=None, vision: bool = False,
+            locate: bool = False, deadline: float | None = None) -> Extraction:
     """Send only `pages` of `pdf` to the AI and return the parsed JSON.
 
     Picture filings (vision=True) go to GLM 5.3 Flash first when GLM_FLASH is set, falling back to
     the main provider (Gemini / Claude) if it fails; everything else goes to the main provider.
+    `deadline` (time.monotonic()) bounds the whole step: GLM gets a share that leaves the fallback
+    time to answer.
     """
     from . import glm
 
     prov = provider()
+    deadline = deadline or time.monotonic() + 280
     attempts = []
-    if vision and glm.api_key() and not model:
+    # GLM on a free tier can be slow; only try it with time to spare for a fallback.
+    if vision and glm.api_key() and not model and (deadline - time.monotonic() > 100 or not prov):
         attempts.append("glm")
     if prov:
         attempts.append(prov)
@@ -205,22 +216,23 @@ def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str =
         raise RuntimeError("No AI key configured: set GEMINI_API_KEY (or GLM_FLASH for picture filings)")
 
     pdf_bytes = excerpt_pdf(pdf, pages)
-    instruction = _instruction(pdf, pages, vision)
+    instruction = _instruction(pdf, pages, vision, locate)
     failures = []
     for who in attempts:
         name = glm.label() if who == "glm" else (model or default_model(who))
-        cache_key = hashlib.sha256(pdf_bytes + f"{who}:{name}:{vision}".encode() + SYSTEM.encode()).hexdigest()[:16]
+        cache_key = hashlib.sha256(pdf_bytes + f"{who}:{name}:{vision}:{locate}".encode() + SYSTEM.encode()).hexdigest()[:16]
         cache_file = (cache_dir or pdf.parent) / f"{pdf.stem}.{cache_key}.extract.json"
         if cache_file.exists():
             cached = json.loads(cache_file.read_text())
             return Extraction(cached["data"], cached["model"], cached.get("usage", {}))
         try:
             if who == "glm":
-                data, used, usage = glm.extract(pdf, pages, SYSTEM, instruction)
+                budget = deadline if not prov else min(deadline - 75, time.monotonic() + 150)
+                data, used, usage = glm.extract(pdf, pages, SYSTEM, instruction, deadline=budget)
                 ex = Extraction(data, f"{used} via {'NVIDIA' if glm.is_nvidia() else 'Z.ai'}",
                                 {"input_tokens": usage.get("prompt_tokens"), "output_tokens": usage.get("completion_tokens")})
             elif who == "gemini":
-                ex = _gemini(pdf_bytes, instruction, name, effort, client, vision)
+                ex = _gemini(pdf_bytes, instruction, name, effort, client, vision, deadline)
             else:
                 ex = _claude(pdf_bytes, instruction, name, effort, client)
         except Exception as e:  # try the next provider, report all if none works
@@ -298,13 +310,14 @@ def gemini_schema(node):
     return out
 
 
-def _gemini(pdf_bytes: bytes, instruction: str, model: str, effort: str, client, vision: bool = False) -> Extraction:
+def _gemini(pdf_bytes: bytes, instruction: str, model: str, effort: str, client, vision: bool = False,
+            deadline: float | None = None) -> Extraction:
     from google import genai
     from google.genai import errors, types
 
     client = client or genai.Client(
         api_key=gemini_key(),
-        http_options=types.HttpOptions(timeout=280_000),
+        http_options=types.HttpOptions(timeout=int(max(30.0, min(280.0, (deadline or time.monotonic() + 280) - time.monotonic())) * 1000)),
     )
     pinned = bool(os.environ.get("SGX_GEMINI_MODEL", "").strip())
     candidates = [model] + ([] if pinned else [m for m in GEMINI_MODELS if m != model])

@@ -211,15 +211,26 @@ class SGXClient:
         return urls
 
     def download(self, url: str, dest_dir: Path) -> Path | None:
-        """Download one attachment; returns None if it is not a PDF."""
+        """Download one attachment (once per folder); returns None if it is not a PDF."""
         dest_dir.mkdir(parents=True, exist_ok=True)
+        index_file = dest_dir / ".downloads.json"
+        try:
+            index = json.loads(index_file.read_text()) if index_file.exists() else {}
+        except ValueError:
+            index = {}
+        if url in index:
+            if index[url] is None:
+                return None  # known not to be a PDF
+            if (dest_dir / index[url]).exists():
+                return dest_dir / index[url]
         r = self.session.get(url, timeout=self.timeout * 4)
         r.raise_for_status()
-        if not r.content.startswith(b"%PDF"):
-            return None
-        name = _filename(r, url)
-        path = dest_dir / name
-        path.write_bytes(r.content)
+        path = None
+        if r.content.startswith(b"%PDF"):
+            path = dest_dir / _filename(r, url)
+            path.write_bytes(r.content)
+        index[url] = path.name if path else None
+        index_file.write_text(json.dumps(index))
         time.sleep(0.5)  # be polite to links.sgx.com
         return path
 

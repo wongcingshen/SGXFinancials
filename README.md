@@ -32,6 +32,10 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    assets"*, *"net cash from operating activities"*, plus numeric density) and penalises notes,
    commentary and contents pages. Picks the best attachment and the 1–3 pages for each statement,
    including continuation pages.
+   **Fallback:** when the deciding words for a statement aren't found, the AI finds the
+   statements itself in a shortlist (a document of up to 24 pages whole; otherwise the pages
+   found plus the most number-heavy pages). Bank and Indian-format titles ("Statement of
+   Standalone Financial Results", "Statement of Assets and Liabilities") are recognised.
 5. **AI extraction** (`sgx_fin/extractor.py`): only the selected pages are cut into a small PDF
    and sent to the AI with a strict JSON schema built from the template, so
    every number lands on a known line. Group (consolidated) figures only, with the company's own label kept for audit.

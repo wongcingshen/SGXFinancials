@@ -25,10 +25,14 @@ TITLES = {
         r"profit (or|and) loss (and other comprehensive income )?statement",
         r"statements? of profit or loss and other comprehensive income",
         r"profit and loss accounts?",
+        # Banks / Indian listings: "Statement of Standalone Audited Financial Results"
+        r"statements? of (?:(?:audited|unaudited|reviewed|standalone|consolidated)\s+)*financial results",
+        r"(?:standalone|consolidated) (?:(?:audited|unaudited|reviewed)\s+)?financial results",
     ],
     "balance_sheet": [
         r"statements? of (consolidated )?financial position",
         r"(consolidated )?balance sheets?",
+        r"statements? of (?:(?:standalone|consolidated)\s+)?assets and liabilities",
     ],
     "cash_flow": [
         r"statements? of (consolidated )?cash flows?",
@@ -44,6 +48,10 @@ BODY = {
         "income tax expense", "tax expense", "profit for the", "loss for the",
         "earnings per share", "attributable to", "non-controlling interests",
         "share of results of", "share of profit",
+        # banks
+        "interest earned", "interest expended", "net interest income", "interest income",
+        "operating profit before provisions", "provisions and contingencies", "total income",
+        "total expenditure", "net profit",
     ],
     "balance_sheet": [
         "non-current assets", "current assets", "total assets", "property, plant and equipment",
@@ -51,6 +59,9 @@ BODY = {
         "cash and bank balances", "current liabilities", "non-current liabilities",
         "total liabilities", "trade and other payables", "borrowings", "share capital",
         "retained earnings", "accumulated profits", "reserves", "total equity", "net assets",
+        # banks
+        "deposits", "advances", "capital and liabilities", "other liabilities and provisions",
+        "balances with banks", "balances with reserve bank",
     ],
     "cash_flow": [
         "operating activities", "investing activities", "financing activities",
@@ -107,12 +118,44 @@ class ScanResult:
         """
         if not self.image_only_pages:
             return False
-        return not self.found_all or len(self.image_only_pages) >= max(3, 0.3 * self.page_count)
+        if not any(self.selected.values()):
+            return True  # no statement in the text at all
+        return len(self.image_only_pages) >= max(3, 0.5 * self.page_count)  # mostly pictures
 
-    def vision_pages(self, cap: int = 60) -> list[int]:
-        """Pages for the AI to look through when the statements are pictures: every picture page
-        plus whatever the text scan found, in page order, at most `cap`."""
-        return sorted(set(self.all_selected) | set(self.image_only_pages))[:cap]
+    @property
+    def needs_ai_locate(self) -> bool:
+        """A text PDF where the deciding words for some statement weren't found."""
+        return not self.needs_vision and not self.found_all
+
+    @property
+    def missing(self) -> list[str]:
+        return [st for st in TITLES if not self.selected.get(st)]
+
+    def locate_pages(self, cap: int = 24) -> list[int]:
+        """Shortlist for the AI to find the statements in, when the keywords fell short: a short
+        document whole; otherwise what the scan found plus the most number-heavy pages (statement
+        tables are mostly numbers), skipping contents and commentary pages."""
+        if self.page_count <= cap:
+            return list(range(1, self.page_count + 1))
+        pages = list(self.all_selected)
+        dense = sorted((p for p in self.pages if p.has_text), key=lambda p: -p.numeric_ratio)
+        for p in dense:
+            if len(pages) >= cap:
+                break
+            if p.page not in pages and p.numeric_ratio >= 0.15:
+                pages.append(p.page)
+        return sorted(pages)
+
+    def vision_pages(self, cap: int = 24) -> list[int]:
+        """Pages for the AI to look through when the statements are pictures: whatever the text scan
+        found, then picture pages from the front (where results filings put their statements)."""
+        pages = list(self.all_selected)
+        for p in self.image_only_pages:
+            if len(pages) >= cap:
+                break
+            if p not in pages:
+                pages.append(p)
+        return sorted(pages)
 
 
 def page_texts(pdf: Path) -> list[str]:

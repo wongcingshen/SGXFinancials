@@ -46,6 +46,21 @@ def name_score(name: str) -> int:
     return 1 if FINANCIAL_NAME.search(name) else 0
 
 
+_SCANS: dict[tuple, ScanResult | None] = {}
+
+
+def cached_scan(pdf: Path) -> ScanResult | None:
+    """scan_pdf, remembered for this process (the scan and extract requests read the same file)."""
+    st = pdf.stat()
+    key = (str(pdf), st.st_size, st.st_mtime_ns)
+    if key not in _SCANS:
+        try:
+            _SCANS[key] = scan_pdf(pdf)
+        except Exception:  # corrupt / encrypted attachment
+            _SCANS[key] = None
+    return _SCANS[key]
+
+
 def pick_best_pdf(pdfs: list[Path], scans: dict | None = None) -> tuple[Path, ScanResult] | None:
     """The attachment that holds the financial statements: by what its pages contain, preferring
     one that isn't a presentation or release, then by how financial its name looks."""
@@ -53,10 +68,7 @@ def pick_best_pdf(pdfs: list[Path], scans: dict | None = None) -> tuple[Path, Sc
     best = None
     for pdf in pdfs:
         if pdf not in scans:
-            try:
-                scans[pdf] = scan_pdf(pdf)
-            except Exception:  # corrupt / encrypted attachment
-                scans[pdf] = None
+            scans[pdf] = cached_scan(pdf)
         res = scans[pdf]
         if res is None:
             continue
@@ -98,14 +110,17 @@ def choose_financial_pdf(client: SGXClient, links: list[tuple[str, str]], folder
 def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | None = None,
                 model: str | None = None, effort: str = "high",
                 dry_run: bool = False, meta: dict | None = None,
-                cache_dir: Path | None = None) -> Result:
-    scan = scan or scan_pdf(pdf)
+                cache_dir: Path | None = None, deadline: float | None = None) -> Result:
+    scan = scan or cached_scan(pdf) or scan_pdf(pdf)
     pages = pages or default_pages(scan)
     result = Result(pdf, scan, pages, meta=dict(meta or {}))
     if dry_run or not pages:
         return result
     vision = any(p in scan.image_only_pages for p in pages)
-    ex = extractor.extract(pdf, pages, model=model, effort=effort, cache_dir=cache_dir, vision=vision)
+    # The AI finds the statements itself when the keyword scan couldn't, or when pages were chosen by hand.
+    locate = vision or not scan.found_all or set(pages) != set(scan.all_selected)
+    ex = extractor.extract(pdf, pages, model=model, effort=effort, cache_dir=cache_dir, vision=vision,
+                           locate=locate, deadline=deadline)
     result.normalised = extractor.normalise(ex.data)
     result.usage = ex.usage
     result.meta.update({
@@ -117,6 +132,7 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
         "pages": ",".join(map(str, pages)),
         "model": ex.model,
         "vision": vision,
+        "located_by_ai": locate,
         # Where the AI says each statement was, as page numbers of the original PDF.
         "found_pages": {st: sorted({pages[i - 1] for i in (ex.data.get(st) or {}).get("page_numbers", [])
                                     if isinstance(i, int) and 1 <= i <= len(pages)})
@@ -126,9 +142,13 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
 
 
 def default_pages(scan: ScanResult) -> list[int]:
-    """The pages to send to the AI: the statements the keyword scan found or, when the statements
-    are pictures it can't read, the picture pages for the AI to look through."""
-    return scan.vision_pages() if scan.needs_vision else scan.all_selected
+    """The pages to send to the AI: the statements the keyword scan found; when it found only some,
+    a shortlist for the AI to find them in; when they are pictures, the picture pages."""
+    if scan.needs_vision:
+        return scan.vision_pages()
+    if not scan.found_all:
+        return scan.locate_pages()
+    return scan.all_selected
 
 
 def process_announcement(client: SGXClient, ann: Announcement, work_dir: Path, **kw) -> Result | None:
