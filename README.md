@@ -69,7 +69,7 @@ python tests/dev_server.py --mock      # demo data; drop --mock for the real thi
    | `GEMINI_API_KEY` | yes (or `ANTHROPIC_API_KEY`) | Gemini API key for extraction |
    | `APP_PASSWORD` | strongly recommended | Anyone with the URL could otherwise spend your API credits |
    | `SGX_AUTH_TOKEN` | only if needed | See *SGX token* below |
-   | `GEMINI_MODEL` | no | Pin a model. Default is Flash-Lite (largest free daily allowance): `gemini-3.1-flash-lite`, then `gemini-flash-lite-latest`, then `gemini-2.5-flash-lite` if one is unavailable or out of quota. Each filing uses one request. Try `gemini-3.1-pro-preview` for hard filings |
+   | `GEMINI_MODEL` | no | Pin a model. Default is Flash-Lite (largest free daily allowance): latest `gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`, then `gemini-flash-lite-latest` if one is unavailable or out of quota. Each filing uses one request. Try `gemini-3.1-pro-preview` for hard filings |
    | `ANTHROPIC_API_KEY` / `CLAUDE_MODEL` | no | Use Claude (`claude-opus-5-5`) instead; with both keys set, `AI_PROVIDER=gemini\|anthropic` picks |
 
 3. Deploy. Open the site, enter the password, pick a date and click **Screen**, then

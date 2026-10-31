@@ -24,7 +24,7 @@ CLAUDE_DEFAULT = "claude-opus-5-5"
 # Flash-Lite only: its free daily request allowance is far larger than Flash's. Tried in order
 # when a model is missing for the key or its quota is used up (each model has its own quota).
 # Set GEMINI_MODEL to pin one, e.g. gemini-3.1-pro-preview for the hardest filings.
-GEMINI_MODELS = ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"]
+GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest"]
 UNIT_FACTORS = {"units": 1, "thousands": 1_000, "millions": 1_000_000, "billions": 1_000_000_000}
 
 
