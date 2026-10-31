@@ -24,21 +24,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from flask import Flask, jsonify, request
+from flask import Flask, abort, jsonify, request, send_from_directory
 
 from sgx_fin import extractor
 from sgx_fin.excel_writer import workbook_bytes
 from sgx_fin.pipeline import pick_best_pdf, process_pdf
 from sgx_fin.sgx_client import Announcement, SGXClient, Screen, is_sgx_url
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)
+PUBLIC = Path(__file__).resolve().parent.parent / "public"
 app.config["MAX_CONTENT_LENGTH"] = 4_400_000  # Vercel caps request bodies at 4.5 MB
 WORK = Path(tempfile.gettempdir()) / "sgx_fin"
 
 
 @app.before_request
 def _auth():
-    if request.path.endswith("/health"):
+    if not request.path.startswith("/api/") or request.path.endswith("/health"):
         return None
     pw = os.environ.get("APP_PASSWORD")
     if pw and not hmac.compare_digest(request.headers.get("X-App-Password", ""), pw):
@@ -51,6 +52,20 @@ def _err(e):
     traceback.print_exc()
     code = getattr(e, "code", 500)
     return jsonify(error=f"{type(e).__name__}: {e}"), code if isinstance(code, int) else 500
+
+
+# Vercel serves public/ from its CDN; these routes cover local runs (`flask --app api/index run`)
+# and any deployment where Flask receives the page request itself.
+@app.get("/")
+def home():
+    return send_from_directory(PUBLIC, "index.html")
+
+
+@app.get("/<path:name>")
+def static_file(name: str):
+    if name.startswith("api/") or not (PUBLIC / name).is_file():
+        abort(404)
+    return send_from_directory(PUBLIC, name)
 
 
 @app.get("/api/health")

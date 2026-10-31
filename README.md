@@ -35,6 +35,30 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
 The row layout lives in **`sgx_fin/template.py`**. Edit labels, order or add rows there to match
 your ShareInvestor view exactly; nothing else needs changing.
 
+## Web app
+
+`public/` (`index.html`, `styles.css`, `app.js`) is a dependency-free page in the SideTrek design
+language (tokens from `TravelFriend/docs/design/tokens.css`: ivory background, Ember coral, Sun
+yellow, Fraunces + Outfit, rounded cards, one accent colour per company):
+
+- **Screen**: pick From / To dates and an optional company, or paste an SGX page URL. The exact
+  SGX screening URL is shown. `/?url=<SGX page URL>` deep-links straight into a screen.
+- **Announcement cards**: one per filing, with **Scan** (keyword scan only, free) and **Extract**.
+- **Run sheet**: real progress (Download → Keyword scan → Claude reads → Workbook), the pages the
+  scan chose per statement with a page map, tie-out checks, Claude's notes and the download.
+  "Wrong pages?" re-runs with pages you choose.
+- **Process a filing**: an SGX announcement/PDF link or a PDF upload.
+- **Settings**: app password, how hard Claude reads (effort), and a workbook to merge the next
+  extraction into.
+
+Preview it locally without SGX access or an API key:
+
+```bash
+pip install -r requirements.txt
+python tests/dev_server.py --mock      # demo data; drop --mock for the real thing
+# open http://127.0.0.1:5000
+```
+
 ## Deploy to Vercel
 
 1. Import this GitHub repo in Vercel (**Add New → Project**). Framework preset: **Other**. No build settings needed.

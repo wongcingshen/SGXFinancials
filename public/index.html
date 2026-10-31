@@ -3,201 +3,247 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SGX Results Extractor</title>
-<style>
-  :root {
-    --bg: #f6f7f9; --card: #fff; --text: #1b1f24; --muted: #5f6b7a; --line: #dde1e6;
-    --accent: #1f3864; --accent-text: #fff; --ok: #1a7f37; --ok-bg: #dcf5e3; --bad: #b42318; --bad-bg: #fde4e1;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f1216; --card: #171b21; --text: #e6e9ee; --muted: #9aa5b4; --line: #2a313b;
-      --accent: #6d8fd1; --accent-text: #0f1216; --ok: #5fd27d; --ok-bg: #16301f; --bad: #ff8a7a; --bad-bg: #3a1a17;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
-  h1 { font-size: 22px; margin: 0 0 4px; }
-  h2 { font-size: 16px; margin: 0 0 12px; }
-  p.lead { color: var(--muted); margin: 0 0 20px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
-  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
-  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
-  input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; min-width: 0; }
-  input[type=text], input[type=url] { width: 100%; }
-  .grow { flex: 1 1 260px; }
-  button { font: inherit; border: 0; border-radius: 6px; padding: 8px 14px; background: var(--accent); color: var(--accent-text); cursor: pointer; }
-  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); padding: 4px 10px; }
-  button:disabled { opacity: .5; cursor: wait; }
-  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
-  .table-wrap { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  th { font-size: 12px; color: var(--muted); font-weight: 600; }
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px; }
-  .PASS { background: var(--ok-bg); color: var(--ok); } .FAIL { background: var(--bad-bg); color: var(--bad); } .na { color: var(--muted); }
-  .err { color: var(--bad); white-space: pre-wrap; }
-  .muted { color: var(--muted); }
-  details summary { cursor: pointer; color: var(--muted); }
-</style>
+<title>SGX Financials</title>
+<meta name="description" content="Screen SGX financial results announcements and turn the three statements into a ShareInvestor-style Excel workbook.">
+<meta name="theme-color" content="#FAF9F5">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 34'%3E%3Crect width='34' height='34' rx='10' fill='%23F2784B'/%3E%3Crect x='8' y='19' width='4' height='7' rx='1.2' fill='%23141413'/%3E%3Crect x='14' y='15' width='4' height='11' rx='1.2' fill='%23141413'/%3E%3Ccircle cx='24' cy='11' r='4.4' fill='%23FFD66B' stroke='%23141413' stroke-width='1.8'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Outfit:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-<main>
-  <h1>SGX Financial Results → Excel</h1>
-  <p class="lead">Screen SGX announcements, find the three financial statements without AI (keyword scan), then let Claude read only those pages and fill a ShareInvestor-style workbook.</p>
 
-  <div class="card">
-    <h2>1 · Screen SGX announcements</h2>
-    <div class="row">
-      <label>From <input type="date" id="from"></label>
-      <label>To <input type="date" id="to"></label>
-      <label>Category
-        <select id="cat"><option value="ANNC17">ANNC17 · Financial Statements</option></select>
-      </label>
-      <label class="grow">Company / stock code (optional) <input type="text" id="company" placeholder="e.g. DBS GROUP or D05"></label>
+<!-- Lucide icons (stroke 1.9) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-building" viewBox="0 0 24 24"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4M10 10h4M10 14h4M10 18h4"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8M16 13H8M16 17H8"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.66 0l3-3a4 4 0 0 0-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 0 0-5.66 0l-3 3a4 4 0 0 0 5.66 5.66l1-1"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/><path d="m16 16-1.9-1.9"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M9.94 15.5a2 2 0 0 0-1.44-1.44l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0l1.58 6.14a2 2 0 0 0 1.44 1.44l6.14 1.58a.5.5 0 0 1 0 .96l-6.14 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0Z"/></symbol>
+  <symbol id="i-sheet" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></symbol>
+  <symbol id="i-trend" viewBox="0 0 24 24"><path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/></symbol>
+  <symbol id="i-scale" viewBox="0 0 24 24"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10M12 3v18M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></symbol>
+  <symbol id="i-cash" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M8 16H3v5"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></symbol>
+</svg>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="SGX Financials home">
+      <svg width="36" height="36" viewBox="0 0 34 34" aria-hidden="true">
+        <rect width="34" height="34" rx="10" fill="#F2784B"/>
+        <rect x="8" y="19" width="4" height="7" rx="1.2" fill="#141413"/>
+        <rect x="14" y="15" width="4" height="11" rx="1.2" fill="#141413"/>
+        <path d="M10 15.5c2.5-1.2 5-2.6 9.5-4.5" fill="none" stroke="#141413" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="0.1 4.2"/>
+        <circle cx="24" cy="11" r="4.4" fill="#FFD66B" stroke="#141413" stroke-width="1.8"/>
+      </svg>
+      <span class="brand-name">SGX Financials</span>
+    </a>
+    <div class="header-actions">
+      <span class="status-pill" id="statusPill"><span class="dot"></span><span id="statusText">Checking server…</span></span>
+      <button type="button" class="btn btn-outline" id="openDirect" aria-label="Process a filing">
+        <svg class="i"><use href="#i-file"/></svg><span class="hide-sm">Process a filing</span>
+      </button>
+      <button type="button" class="icon-btn" id="openSettings" aria-label="Settings">
+        <svg class="i"><use href="#i-sliders"/></svg>
+      </button>
     </div>
-    <div class="row" style="margin-top:12px">
-      <label class="grow">…or paste an SGX page URL
-        <input type="url" id="sgxurl" placeholder="https://www.sgx.com/stock-exchange/company-announcements?from=20261030&to=20261030&ANNC=ANNC17">
-      </label>
-      <button id="screenBtn">Screen</button>
-    </div>
-    <p class="muted" style="margin:10px 0 0">Screening URL: <a id="pageLink" class="mono" target="_blank" rel="noopener"></a></p>
-    <div id="screenOut" style="margin-top:12px"></div>
   </div>
+</header>
 
-  <div class="card">
-    <h2>2 · Or process a single filing directly</h2>
-    <div class="row">
-      <label class="grow">SGX announcement or PDF link <input type="url" id="directUrl" placeholder="https://links.sgx.com/1.0.0/corporate-announcements/..."></label>
-      <label>…or upload PDF (≤ 4 MB) <input type="file" id="pdfFile" accept="application/pdf"></label>
+<main class="wrap">
+  <section class="hero" aria-labelledby="heroTitle">
+    <div class="hero-top">
+      <div class="hero-copy">
+        <p class="eyebrow">SGX results, automated</p>
+        <h1 id="heroTitle">Three statements.<br>Straight into Excel.</h1>
+        <p class="lead">Screen SGX for financial results, find the income statement, balance sheet and cash flow pages with a keyword scan, then let Claude read only those pages into a ShareInvestor-style workbook.</p>
+      </div>
+      <div class="hero-art" aria-hidden="true">
+        <svg viewBox="0 0 420 250">
+          <rect width="420" height="250" rx="22" fill="#FDEBDD"/>
+          <circle cx="378" cy="34" r="54" fill="#FFD66B"/>
+          <path d="M-10 196 C80 170 130 228 220 200 S350 120 430 136" fill="none" stroke="#F9D6C2" stroke-width="16"/>
+          <!-- filing page -->
+          <g transform="translate(34 34) rotate(-4)">
+            <rect width="150" height="186" rx="12" fill="#FFFFFF"/>
+            <rect x="16" y="18" width="70" height="8" rx="4" fill="#141413" opacity=".75"/>
+            <rect x="16" y="34" width="110" height="5" rx="2.5" fill="#EBE5DA"/>
+            <rect x="10" y="52" width="130" height="22" rx="6" fill="#DBEEED"/>
+            <rect x="18" y="60" width="54" height="6" rx="3" fill="#1D6766"/><rect x="104" y="60" width="28" height="6" rx="3" fill="#1D6766"/>
+            <rect x="10" y="80" width="130" height="22" rx="6" fill="#E3E6F3"/>
+            <rect x="18" y="88" width="64" height="6" rx="3" fill="#3B4A8C"/><rect x="104" y="88" width="28" height="6" rx="3" fill="#3B4A8C"/>
+            <rect x="10" y="108" width="130" height="22" rx="6" fill="#F4E8D6"/>
+            <rect x="18" y="116" width="48" height="6" rx="3" fill="#8A5712"/><rect x="104" y="116" width="28" height="6" rx="3" fill="#8A5712"/>
+            <rect x="16" y="142" width="118" height="5" rx="2.5" fill="#EBE5DA"/>
+            <rect x="16" y="154" width="96" height="5" rx="2.5" fill="#EBE5DA"/>
+            <rect x="16" y="166" width="108" height="5" rx="2.5" fill="#EBE5DA"/>
+          </g>
+          <path d="M196 128 C220 116 236 116 258 124" fill="none" stroke="#141413" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="1 8" opacity=".6"/>
+          <circle cx="226" cy="118" r="15" fill="#F2784B"/>
+          <path d="M226 110l1.6 4.9 4.9 1.6-4.9 1.6-1.6 4.9-1.6-4.9-4.9-1.6 4.9-1.6Z" fill="#141413"/>
+          <!-- workbook -->
+          <g transform="translate(266 70)">
+            <rect width="128" height="128" rx="14" fill="#FFFFFF"/>
+            <rect width="128" height="26" rx="14" fill="#141413"/><rect y="13" width="128" height="13" fill="#141413"/>
+            <text x="12" y="18" font-family="Outfit, sans-serif" font-size="10" font-weight="600" fill="#FFFFFF">FY 2026  ·  S$'000</text>
+            <g font-family="Outfit, sans-serif" font-size="10" fill="#141413">
+              <text x="12" y="46">Revenue</text><text x="116" y="46" text-anchor="end" font-weight="600">120,512</text>
+              <text x="12" y="66">Gross profit</text><text x="116" y="66" text-anchor="end" font-weight="600">40,100</text>
+              <text x="12" y="86">Total assets</text><text x="116" y="86" text-anchor="end" font-weight="600">199,000</text>
+              <text x="12" y="106">Free cash flow</text><text x="116" y="106" text-anchor="end" font-weight="600">14,100</text>
+            </g>
+            <path d="M8 54h112M8 74h112M8 94h112" stroke="#EBE5DA"/>
+          </g>
+        </svg>
+      </div>
     </div>
-    <div class="row" style="margin-top:12px">
-      <label>Stock code <input type="text" id="dCode" placeholder="D05" size="8"></label>
-      <label class="grow">Company name <input type="text" id="dName"></label>
-      <button class="ghost" id="dScan">Scan pages only</button>
-      <button id="dExtract">Extract to Excel</button>
-    </div>
-  </div>
 
-  <div class="card">
-    <h2>Options</h2>
-    <div class="row">
-      <label>Merge into existing workbook (optional) <input type="file" id="workbook" accept=".xlsx"></label>
-      <label>Override pages <input type="text" id="pages" placeholder="e.g. 7,8,9" size="10"></label>
-      <label>AI effort
-        <select id="effort"><option>medium</option><option selected>high</option><option>xhigh</option></select>
-      </label>
-      <label>App password <input type="password" id="pw" placeholder="if APP_PASSWORD is set"></label>
+    <form class="screen-bar" id="screenForm" autocomplete="off">
+      <div class="field">
+        <label class="lbl" for="from">From</label>
+        <input type="date" id="from" required>
+      </div>
+      <div class="field">
+        <label class="lbl" for="to">To</label>
+        <input type="date" id="to" required>
+      </div>
+      <div class="field company">
+        <label class="lbl" for="company">Company or stock code</label>
+        <input type="text" id="company" placeholder="All companies">
+      </div>
+      <button type="submit" class="btn btn-ink" id="screenBtn">
+        <svg class="i"><use href="#i-search"/></svg>Screen SGX
+      </button>
+    </form>
+    <div class="url-row">
+      <span>Screening</span>
+      <a class="url-chip" id="pageLink" target="_blank" rel="noopener"></a>
+      <button type="button" class="link-btn" id="togglePaste">Paste an SGX link instead</button>
     </div>
-    <p class="muted" id="health" style="margin:10px 0 0"></p>
-  </div>
+    <div class="paste-url" id="pasteRow">
+      <label class="sr-only" for="sgxUrl">SGX announcements page URL</label>
+      <input type="url" id="sgxUrl" placeholder="https://www.sgx.com/stock-exchange/company-announcements?from=20261030&to=20261030&ANNC=ANNC17">
+    </div>
+  </section>
 
-  <div class="card" id="resultCard" hidden>
-    <h2>Result</h2>
-    <div id="result"></div>
+  <section class="section" aria-labelledby="annTitle">
+    <div class="section-head">
+      <h2 id="annTitle">Announcements</h2>
+      <span class="note" id="annNote">ANNC17 · Financial Statements</span>
+    </div>
+    <div id="results"></div>
+  </section>
+
+  <div class="footer-note">
+    <span><svg class="i" style="width:16px;height:16px"><use href="#i-lock"/></svg>No storage. Workbooks are built in memory and downloaded to this browser; your API key stays on the server.</span>
+    <a href="https://github.com/wongcingshen/SGXFinancials" target="_blank" rel="noopener">Source on GitHub</a>
   </div>
 </main>
 
-<script>
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const store = { get(k) { try { return localStorage.getItem(k) || ""; } catch { return ""; } },
-                set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+<!-- Run sheet: scan + extract one filing -->
+<dialog class="sheet" id="runSheet" aria-labelledby="runTitle">
+  <div class="sheet-head banded" id="runHead">
+    <div class="t">
+      <p class="eyebrow" id="runEyebrow" style="opacity:.85"></p>
+      <h2 id="runTitle"></h2>
+      <div class="sub" id="runSub"></div>
+    </div>
+    <button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="sheet-body" id="runBody"></div>
+  <div class="sheet-foot" id="runFoot" hidden></div>
+</dialog>
 
-const sgtToday = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
-$("from").value = $("to").value = sgtToday;
-$("pw").value = store.get("pw");
-$("pw").addEventListener("change", () => store.set("pw", $("pw").value));
+<!-- Direct filing -->
+<dialog class="sheet narrow" id="directSheet" aria-labelledby="directTitle">
+  <div class="sheet-head">
+    <div class="t">
+      <h2 id="directTitle">Process a filing</h2>
+      <div class="sub muted">An SGX announcement link, a direct PDF link, or a PDF from your computer.</div>
+    </div>
+    <button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="sheet-body">
+    <form class="form" id="directForm">
+      <div class="form-row">
+        <label for="directUrl">SGX link</label>
+        <input class="input" type="url" id="directUrl" placeholder="https://links.sgx.com/1.0.0/corporate-announcements/…">
+      </div>
+      <div class="divider">or</div>
+      <div class="form-row">
+        <span class="lbl">Upload a PDF</span>
+        <div class="drop" id="pdfDrop">
+          <span class="sun-circle"><svg class="i"><use href="#i-upload"/></svg></span>
+          <span><span class="fname" id="pdfName">Choose or drop a PDF</span><br><span class="muted" style="font-size:13px">Up to 4 MB. Bigger files: use the SGX link.</span></span>
+          <input type="file" id="pdfFile" accept="application/pdf" aria-label="PDF file">
+        </div>
+      </div>
+      <div class="two">
+        <div class="form-row"><label for="dCode">Stock code</label><input class="input" id="dCode" placeholder="D05"></div>
+        <div class="form-row"><label for="dName">Company</label><input class="input" id="dName" placeholder="DBS Group Holdings"></div>
+      </div>
+      <div class="form-row">
+        <label for="dPages">Pages (optional)</label>
+        <input class="input" id="dPages" placeholder="Blank = keyword scan picks, or e.g. 7,8,9">
+      </div>
+    </form>
+  </div>
+  <div class="sheet-foot">
+    <button type="button" class="btn btn-ember btn-lg btn-block" id="dExtract"><svg class="i"><use href="#i-sparkles"/></svg>Extract to Excel</button>
+    <button type="button" class="btn btn-outline btn-block" id="dScan" style="border-radius:16px;min-height:46px"><svg class="i"><use href="#i-scan"/></svg>Scan pages only (no AI)</button>
+  </div>
+</dialog>
 
-function pageUrl() {
-  if ($("sgxurl").value.trim()) return $("sgxurl").value.trim();
-  const d = (v) => v.replaceAll("-", "");
-  return `https://www.sgx.com/stock-exchange/company-announcements?from=${d($("from").value)}&to=${d($("to").value)}&ANNC=${$("cat").value}`;
-}
-function refreshLink() { const u = pageUrl(); $("pageLink").href = u; $("pageLink").textContent = u; }
-["from", "to", "cat", "sgxurl"].forEach((id) => $(id).addEventListener("input", refreshLink));
-refreshLink();
+<!-- Settings -->
+<dialog class="sheet narrow" id="settingsSheet" aria-labelledby="settingsTitle">
+  <div class="sheet-head">
+    <div class="t"><h2 id="settingsTitle">Settings</h2><div class="sub muted">Saved in this browser.</div></div>
+    <button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="sheet-body">
+    <div class="form">
+      <div class="form-row">
+        <label for="pw">App password</label>
+        <input class="input" type="password" id="pw" autocomplete="current-password" placeholder="Only if APP_PASSWORD is set on Vercel">
+      </div>
+      <div class="form-row">
+        <span class="lbl" id="effortLbl">How hard Claude reads</span>
+        <div class="segmented" role="group" aria-labelledby="effortLbl" id="effort">
+          <button type="button" data-v="medium">Faster</button>
+          <button type="button" data-v="high">Balanced</button>
+          <button type="button" data-v="xhigh">Thorough</button>
+        </div>
+        <p class="help">Balanced suits most filings. Thorough helps with banks, REITs and dense layouts, at higher cost.</p>
+      </div>
+      <div class="form-row">
+        <span class="lbl">Merge the next extraction into a workbook</span>
+        <div class="drop" id="wbDrop">
+          <span class="sun-circle"><svg class="i"><use href="#i-sheet"/></svg></span>
+          <span><span class="fname" id="wbName">Choose an earlier .xlsx from this app</span><br><span class="muted" style="font-size:13px">New periods are added as columns; existing ones are kept.</span></span>
+          <input type="file" id="wbFile" accept=".xlsx" aria-label="Workbook to merge into">
+        </div>
+        <button type="button" class="link-btn" id="wbClear" hidden style="align-self:flex-start;color:var(--color-ember-deep)">Don’t merge</button>
+      </div>
+      <div class="notice info" id="serverInfo"></div>
+    </div>
+  </div>
+  <div class="sheet-foot"><button type="button" class="btn btn-ember btn-lg btn-block" data-close>Done</button></div>
+</dialog>
 
-async function api(path, opts = {}) {
-  const r = await fetch(path, { ...opts, headers: { "X-App-Password": $("pw").value, ...(opts.headers || {}) } });
-  const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
-  if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
-  return body;
-}
-
-fetch("/api/health").then((r) => r.json()).then((h) => {
-  $("health").textContent = `Server: model ${h.model} · Anthropic key ${h.anthropic_key ? "configured" : "MISSING"} · password ${h.password_required ? "required" : "not set"}`;
-}).catch(() => { $("health").textContent = "Server API not reachable."; });
-
-$("screenBtn").onclick = async () => {
-  const btn = $("screenBtn"); btn.disabled = true; $("screenOut").innerHTML = "<span class='muted'>Screening…</span>";
-  try {
-    const q = new URLSearchParams({ url: pageUrl(), company: $("company").value.trim() });
-    const res = await api(`/api/screen?${q}`);
-    if (!res.count) { $("screenOut").innerHTML = "<span class='muted'>No announcements for this screen.</span>"; return; }
-    $("screenOut").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Broadcast</th><th>Code</th><th>Issuer</th><th>Title</th><th></th></tr></thead><tbody>${
-      res.announcements.map((a, i) => `<tr><td class="mono">${esc(a.broadcast)}</td><td>${esc(a.stock_code)}</td><td>${esc(a.issuer)}</td>
-        <td><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a></td>
-        <td style="white-space:nowrap"><button class="ghost" data-i="${i}" data-dry="true">Scan</button> <button class="ghost" data-i="${i}">Extract</button></td></tr>`).join("")
-    }</tbody></table></div><p class="muted">${res.count} announcement(s)</p>`;
-    $("screenOut").querySelectorAll("button").forEach((b) => b.onclick = () => {
-      const a = res.announcements[+b.dataset.i];
-      run({ announcement_url: a.url, issuer: a.issuer, stock_code: a.stock_code, title: `${a.broadcast} ${a.title}` }, !!b.dataset.dry, b);
-    });
-  } catch (e) { $("screenOut").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
-  finally { btn.disabled = false; }
-};
-
-$("dScan").onclick = (e) => runDirect(true, e.target);
-$("dExtract").onclick = (e) => runDirect(false, e.target);
-function runDirect(dry, btn) {
-  const f = { issuer: $("dName").value, stock_code: $("dCode").value };
-  const u = $("directUrl").value.trim();
-  if (u) f[/\.pdf($|\?)/i.test(u) || /FileOpen/i.test(u) ? "pdf_url" : "announcement_url"] = u;
-  run(f, dry, btn, $("pdfFile").files[0]);
-}
-
-async function run(fields, dry, btn, pdf) {
-  const fd = new FormData();
-  Object.entries(fields).forEach(([k, v]) => v && fd.append(k, v));
-  fd.append("dry_run", dry ? "true" : "false");
-  fd.append("effort", $("effort").value);
-  if ($("pages").value.trim()) fd.append("pages", $("pages").value.trim());
-  if (pdf) fd.append("pdf", pdf);
-  if (!dry && $("workbook").files[0]) fd.append("workbook", $("workbook").files[0]);
-  $("resultCard").hidden = false;
-  $("result").innerHTML = `<span class="muted">${dry ? "Downloading and scanning pages…" : "Scanning, then Claude is reading the statement pages (can take 1–3 min)…"}</span>`;
-  btn.disabled = true;
-  try { render(await api("/api/process", { method: "POST", body: fd })); }
-  catch (e) { $("result").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
-  finally { btn.disabled = false; }
-}
-
-function render(r) {
-  const s = r.scan, names = { income_statement: "Income statement", balance_sheet: "Balance sheet", cash_flow: "Cash flow" };
-  let h = `<p><b>${esc(s.pdf)}</b> · ${s.page_count} pages${s.attachments.length > 1 ? ` · chosen from ${s.attachments.length} attachments` : ""}</p>`;
-  h += `<div class="table-wrap"><table><thead><tr><th>Statement</th><th>Pages selected (keyword scan)</th><th>Top candidates (page = score)</th></tr></thead><tbody>${
-    Object.keys(names).map((k) => `<tr><td>${names[k]}</td><td>${(s.selected[k] || []).join(", ") || "<span class='err'>not found</span>"}</td>
-      <td class="mono">${s.candidates[k].map((c) => `p${c.page}=${c.score}`).join("  ")}</td></tr>`).join("")
-  }</tbody></table></div>`;
-  if (s.image_only_pages.length) h += `<p class="err">Pages without a text layer (scanned): ${s.image_only_pages.join(", ")} — use "Override pages" if a statement is on one of them.</p>`;
-  if (r.message) h += `<p class="err">${esc(r.message)}</p>`;
-  if (r.extracted) {
-    const url = URL.createObjectURL(new Blob([Uint8Array.from(atob(r.workbook_b64), (c) => c.charCodeAt(0))],
-      { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
-    const pass = r.checks.filter((c) => c.status === "PASS").length, fail = r.checks.filter((c) => c.status === "FAIL").length;
-    h += `<p style="margin-top:14px"><a href="${url}" download="${esc(r.filename)}"><button>Download ${esc(r.filename)}</button></a>
-      <span class="muted"> ${esc(r.meta.company_name)} · ${esc(r.meta.currency)} · pages ${esc(r.meta.pages)} · tokens ${r.usage.input_tokens ?? "cached"}/${r.usage.output_tokens ?? ""}</span></p>`;
-    h += `<p>Tie-out checks: <span class="pill PASS">${pass} pass</span> <span class="pill FAIL">${fail} fail</span></p>`;
-    h += `<details ${fail ? "open" : ""}><summary>Check details</summary><div class="table-wrap"><table><thead><tr><th>Period</th><th>Check</th><th>Status</th><th>Diff</th></tr></thead><tbody>${
-      r.checks.map((c) => `<tr><td>${esc(c.period)}</td><td>${esc(c.check)}</td><td><span class="pill ${c.status === "n/a" ? "na" : c.status}">${c.status}</span></td><td class="mono">${c.difference ?? ""}</td></tr>`).join("")
-    }</tbody></table></div></details>`;
-    if (r.meta.notes) h += `<p class="muted">AI notes: ${esc(r.meta.notes)}</p>`;
-  }
-  $("result").innerHTML = h;
-}
-</script>
+<script src="/app.js"></script>
 </body>
 </html>
