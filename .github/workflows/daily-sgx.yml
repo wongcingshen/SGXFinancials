@@ -1,0 +1,65 @@
+name: Daily SGX results
+
+# Every SGX trading day at 23:30 SGT (15:30 UTC): screen today's ANNC17
+# (Financial Statements) announcements, extract watchlist companies, and
+# commit the updated workbooks to output/.
+on:
+  schedule:
+    - cron: "30 15 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "SGX page URL (e.g. ...company-announcements?from=20261030&to=20261030&ANNC=ANNC17); blank = today"
+        required: false
+      company:
+        description: "Only this issuer name / stock code (blank = watchlist.txt)"
+        required: false
+      dry_run:
+        description: "Scan pages only, no AI"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Screen and extract
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SGX_AUTH_TOKEN: ${{ secrets.SGX_AUTH_TOKEN }}
+          URL: ${{ inputs.url }}
+          COMPANY: ${{ inputs.company }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          url_arg=(); [ -n "$URL" ] && url_arg=("$URL")
+          # Nothing on the watchlist and no company given: just log the day's announcements.
+          if [ -z "$COMPANY" ] && ! grep -qv '^[[:space:]]*\(#\|$\)' watchlist.txt; then
+            python -m sgx_fin screen "${url_arg[@]}"
+            exit 0
+          fi
+          args=("${url_arg[@]}")
+          if [ -n "$COMPANY" ]; then args+=(--company "$COMPANY"); else args+=(--watchlist watchlist.txt); fi
+          if [ "$DRY_RUN" = "true" ] || [ -z "$ANTHROPIC_API_KEY" ]; then
+            [ -z "$ANTHROPIC_API_KEY" ] && echo "::warning::ANTHROPIC_API_KEY secret not set - scan only"
+            args+=(--dry-run)
+          fi
+          python -m sgx_fin run "${args[@]}"
+
+      - name: Commit workbooks
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add output/*.xlsx 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "Update SGX financial workbooks"
+          git push

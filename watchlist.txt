@@ -1,0 +1,6 @@
+# Companies the daily GitHub Action extracts automatically.
+# One SGX stock code or issuer-name fragment per line (case-insensitive).
+# Leave empty to only log the day's financial-results announcements.
+# D05        # DBS Group Holdings
+# O39        # OCBC
+# Z74        # Singtel
