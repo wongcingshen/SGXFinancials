@@ -45,14 +45,17 @@ your ShareInvestor view exactly; nothing else needs changing.
 language (tokens from `TravelFriend/docs/design/tokens.css`: ivory background, Ember coral, Sun
 yellow, Fraunces + Outfit, rounded cards, one accent colour per company):
 
-- **Screen**: pick From / To dates and an optional company, or paste an SGX page URL. The exact
-  SGX screening URL is shown. `/?url=<SGX page URL>` deep-links straight into a screen.
-- **Announcement cards**: one per filing, with **Scan** (keyword scan only, free) and **Extract**.
-- **Run sheet**: real progress (Download → Keyword scan → Gemini reads → Workbook), the pages the
-  scan chose per statement with a page map, tie-out checks, the AI's notes and the download.
-  "Wrong pages?" re-runs with pages you choose.
-- **Process a filing**: an SGX announcement/PDF link or a PDF upload.
-- **Settings**: app password, how hard the AI reads (thinking level), and a workbook to merge the next
+- **Screen**: From / To dates (default, Singapore time: Friday–Sunday on Saturday, Sunday and
+  Monday; otherwise yesterday) and an optional company. `/?from=YYYYMMDD&to=YYYYMMDD` (or
+  `/?url=<SGX page URL>`) deep-links straight into a screen.
+- **Announcement cards**: one per filing, with links to the PDFs in its attachment list and a
+  single **Extract** button; progress shows on the card, then the button becomes **Excel**.
+  Click a company's name for the pages chosen, the tie-out checks and "Wrong pages?" re-runs.
+- **Extract all** works through every card (two at a time) and becomes **Download all** (zip).
+- **Choose download folder** (Chrome / Edge): every workbook is saved straight into that folder,
+  one file per company, and a new filing is merged into the company's file already there.
+- **Process a filing** (header): an SGX announcement/PDF link or a PDF upload.
+- **Settings**: app password, how hard the AI reads, and a workbook to merge the next
   extraction into.
 
 Preview it locally without SGX access or an API key:

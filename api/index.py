@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import hmac
 import os
+import re
 import sys
 import tempfile
 import traceback
@@ -191,7 +192,7 @@ def process():
                       effort=f.get("effort", "high"), cache_dir=WORK)
     existing = request.files["workbook"].read() if request.files.get("workbook") else None
     data, checks = workbook_bytes(existing, res.normalised, res.meta)
-    name = (res.meta.get("stock_code") or res.meta.get("company_name") or "financials").replace(" ", "_")
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", res.meta.get("stock_code") or res.meta.get("company_name") or "").strip("_") or "financials"
     return jsonify(
         scan=scan_info, pages=chosen, extracted=True, meta=res.meta, usage=res.usage, checks=checks,
         filename=f"{name}.xlsx", workbook_b64=base64.b64encode(data).decode(),
