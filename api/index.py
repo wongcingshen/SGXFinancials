@@ -32,7 +32,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from sgx_fin import extractor
 from sgx_fin.excel_writer import workbook_bytes
-from sgx_fin.pipeline import pick_best_pdf, process_pdf
+from sgx_fin.pipeline import attachment_name, choose_financial_pdf, pick_best_pdf, process_pdf
 from sgx_fin.sgx_client import Announcement, SGXClient, Screen, is_sgx_url
 
 app = Flask(__name__, static_folder=None)
@@ -133,47 +133,53 @@ def process():
     WORK.mkdir(parents=True, exist_ok=True)
     client = SGXClient()
 
-    # 1. Get candidate PDFs: an uploaded file, a direct PDF link, or an announcement page.
-    pdfs: list[Path] = []
+    # 1. The PDF to read: an uploaded file, or the attachment of an announcement that holds the
+    #    financial statements (chosen by file name, then by a keyword scan of its pages).
+    used_url, names, downloaded = None, [], []
     if "pdf" in request.files and request.files["pdf"].filename:
         up = request.files["pdf"]
         path = WORK / Path(up.filename).name
         up.save(path)
-        pdfs = [path]
         meta["filing"] = meta["filing"] or up.filename
+        picked = pick_best_pdf([path])
+        names = downloaded = [path.name]
     else:
         pdf_urls = [u for u in f.getlist("pdf_url") if u]
+        pdf_names = f.getlist("pdf_name")
         url = f.get("announcement_url") or (pdf_urls[0] if pdf_urls else "")
         if not url or not all(is_sgx_url(u) for u in [url, *pdf_urls]):
             return jsonify(error="Provide a PDF upload or an https://*.sgx.com link"), 400
         meta["announcement_url"] = url
         ann = Announcement(meta["filing"], meta["company_name"], meta["stock_code"], url, "", "", {})
         folder = WORK / ann.slug
-        # PDF links found by the browser step, else read the announcement page's Attachments.
+        # PDF links found by the browser step, else read the announcement page's attachments.
         try:
-            links = pdf_urls or client.attachments(ann)
+            urls = pdf_urls or client.attachments(ann)
         except Exception as e:
             return jsonify(error=f"Could not open the announcement page: {e}", need_browser=True), 502
-        if not links:
+        if not urls:
             return jsonify(error="No attachments found on the announcement page", need_browser=True), 404
+        links = [(u, attachment_name(u, pdf_names[i] if i < len(pdf_names) else "")) for i, u in enumerate(urls)]
+        names = [n for _, n in links]
         try:
-            pdfs = [p for u in links if (p := client.download(u, folder))]
+            chosen_pdf = choose_financial_pdf(client, links, folder)
         except Exception as e:
             return jsonify(error=f"Could not download the attachment: {e}"), 502
-    if not pdfs:
-        return jsonify(error="The attachments are not PDFs"), 404
-
-    # 2. Non-AI scan picks the attachment and the statement pages.
-    picked = pick_best_pdf(pdfs)
+        if not chosen_pdf:
+            return jsonify(error="None of the attachments is a readable PDF"), 404
+        pdf, scan, used_url, downloaded = chosen_pdf
+        picked = (pdf, scan)
     if not picked:
-        return jsonify(error="Could not read any of the PDFs"), 422
+        return jsonify(error="Could not read the PDF"), 422
+
+    # 2. Non-AI scan result: the statement pages.
     pdf, scan = picked
     scan_info = {
         "pdf": pdf.name, "page_count": scan.page_count, "selected": scan.selected,
         "image_only_pages": scan.image_only_pages,
         "candidates": {st: sorted(({"page": p.page, "score": p.scores[st]} for p in scan.pages),
                                   key=lambda x: -x["score"])[:5] for st in scan.selected},
-        "attachments": [p.name for p in pdfs],
+        "attachments": names, "downloaded": downloaded, "used_url": used_url,
     }
     chosen = pages or scan.all_selected
     if dry_run or not chosen:

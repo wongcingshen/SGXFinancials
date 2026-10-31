@@ -151,13 +151,20 @@ function renderSkeleton() {
   }</div>`;
 }
 
-// The PDFs in the announcement's attachment list, each linked.
+// The PDFs in the announcement's attachment list, each linked. Once extracted, the one that held
+// the financial statements is shown first and marked; the rest (releases, slides) are listed after.
 function filesLine(a) {
   if (!Array.isArray(a.attachments)) return "";
   if (!a.attachments.length) return `<span class="files none">${icon("file", "width:14px;height:14px")}No attachments found</span>`;
-  const links = a.attachments.map((f) =>
-    `<a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.name || "PDF")}</a>`).join(", ");
-  return `<span class="files">${icon("file", "width:14px;height:14px")}<span>${a.attachments.length} PDF${a.attachments.length === 1 ? "" : "s"}: ${links}</span></span>`;
+  const usedUrl = (a.job?.result || a.job?.scan)?.scan?.used_url;
+  const link = (f) => `<a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.name || "PDF")}</a>`;
+  const used = usedUrl && a.attachments.find((f) => f.url === usedUrl);
+  if (used) {
+    const others = a.attachments.filter((f) => f !== used);
+    return `<span class="files used">${icon("check", "width:14px;height:14px")}<span>Extracted from ${link(used)}${
+      others.length ? `<span class="others"> · not used: ${others.map(link).join(", ")}</span>` : ""}</span></span>`;
+  }
+  return `<span class="files">${icon("file", "width:14px;height:14px")}<span>${a.attachments.length} PDF${a.attachments.length === 1 ? "" : "s"}: ${a.attachments.map(link).join(", ")}</span></span>`;
 }
 
 const BUSY = { queued: "Queued", reading: "Reading PDF…", ai: () => `${state.ai} reading…` };
@@ -350,7 +357,7 @@ function formData(a, dryRun, pages, workbook) {
   const fd = new FormData();
   if (a.url && !a.file) fd.append("announcement_url", a.url);
   for (const [k, v] of [["issuer", a.issuer], ["stock_code", a.stock_code], ["title", a.title]]) if (v) fd.append(k, v);
-  for (const f of a.attachments || []) fd.append("pdf_url", f.url);
+  for (const f of a.attachments || []) { fd.append("pdf_url", f.url); fd.append("pdf_name", f.name || ""); }
   if (a.file) fd.append("pdf", a.file);
   fd.append("dry_run", dryRun ? "true" : "false");
   fd.append("effort", state.effort);
@@ -484,7 +491,7 @@ function scanHtml(scan, pages) {
       <p class="block-title">Pages chosen without AI</p>
       <div class="statements">${rows}</div>
       ${strip}
-      <p class="muted" style="margin:10px 0 0;font-size:13px">${esc(scan.pdf)} · ${scan.page_count} pages${scan.attachments.length > 1 ? ` · picked from ${scan.attachments.length} attachments` : ""}${
+      <p class="muted" style="margin:10px 0 0;font-size:13px">${esc(scan.pdf)} · ${scan.page_count} pages${scan.attachments.length > 1 ? ` · the financial statements PDF of ${scan.attachments.length} attachments (${scan.downloaded.length} opened)` : ""}${
         pages?.length ? ` · ${pages.length} page${pages.length === 1 ? "" : "s"} go to ${esc(state.ai)}` : ""}</p>
     </div>
     ${img.size ? `<div class="notice">${icon("alert")}<div>${img.size} page${img.size === 1 ? " has" : "s have"} no text layer (scanned images), so the keyword scan can’t read ${img.size === 1 ? "it" : "them"}. If a statement is missing, enter its pages below.</div></div>` : ""}`;

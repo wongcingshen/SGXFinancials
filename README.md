@@ -21,18 +21,21 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    and reads the result list: the data the page loads for itself (paged through with the page's
    own token), or else the links in the result table. SGX's `api.sgx.com` refuses direct requests
    without that page-generated token, which is why a browser is used.
-2. **Open every link under "Title"** (clicking titles that aren't plain links) and take the files
-   inside the announcement page's `announcement-attachment-list` element, then download the PDFs.
-   Each result card shows the PDFs found before you extract.
-3. **Non-AI page scan** (`sgx_fin/page_scanner.py`): scores every page against keyword sets
+2. **Open every link under "Title"** (clicking titles that aren't plain links) and list the files
+   inside the announcement page's `announcement-attachment-list` element.
+3. **Pick the financial statements PDF** (no AI): attachments are tried by name, results /
+   financial statements first and presentations, slides and media releases last, and the first
+   one whose pages hold all three statements is used; the others are never downloaded. The card
+   shows which PDF was extracted.
+4. **Non-AI page scan** (`sgx_fin/page_scanner.py`): scores every page against keyword sets
    (statement titles such as *"statement of financial position"*, line items such as *"total
    assets"*, *"net cash from operating activities"*, plus numeric density) and penalises notes,
    commentary and contents pages. Picks the best attachment and the 1–3 pages for each statement,
    including continuation pages.
-4. **AI extraction** (`sgx_fin/extractor.py`): only the selected pages are cut into a small PDF
+5. **AI extraction** (`sgx_fin/extractor.py`): only the selected pages are cut into a small PDF
    and sent to the AI with a strict JSON schema built from the template, so
    every number lands on a known line. Group (consolidated) figures only, with the company's own label kept for audit.
-5. **Excel** (`sgx_fin/excel_writer.py`): rescales to `'000`, writes ShareInvestor-style sheets,
+6. **Excel** (`sgx_fin/excel_writer.py`): rescales to `'000`, writes ShareInvestor-style sheets,
    runs tie-out checks (assets = liabilities + equity, op + inv + fin = net change in cash, …)
    and **merges** new periods into an existing workbook so quarters/half-years/full years accumulate.
 

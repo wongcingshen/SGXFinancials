@@ -215,6 +215,7 @@ svg.i { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentCo
 .files a:hover { color: var(--color-ink); }
 .files svg { flex-shrink: 0; }
 .files.none { color: var(--color-muted); font-weight: 500; }
+.files .others, .files .others a { color: var(--color-muted); font-weight: 500; }
 .card-actions { margin-top: auto; padding-top: 12px; display: flex; gap: 8px; }
 .card-actions .btn { flex: 1; min-height: 42px; padding: 0 12px; }
 .card.done .band .pill { background: var(--color-sun); color: var(--color-ink); }

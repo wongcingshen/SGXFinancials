@@ -109,6 +109,42 @@ def test_gross_profit_from_expenses_by_nature():
     assert not norm["income_statement"]["labels"]["cost_of_sales"].startswith("computed")
 
 
+def test_only_the_financial_statements_pdf_is_used():
+    import shutil
+    from pypdf import PdfWriter
+    from sgx_fin.pipeline import choose_financial_pdf
+
+    out = HERE / "out" / "attachments"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    blank = out / "blank.pdf"
+    w = PdfWriter(); w.add_blank_page(612, 792); w.write(blank)
+    sources = {"release": blank, "slides": HERE / "sample_results.pdf", "results": HERE / "sample_results.pdf"}
+
+    class FakeClient:
+        def __init__(self): self.got = []
+        def download(self, url, folder):
+            kind = url.rsplit("=", 1)[1]
+            self.got.append(kind)
+            dest = folder / {"release": "Media Release.pdf", "slides": "Results Presentation.pdf",
+                             "results": "Half Yearly Results.pdf"}[kind]
+            shutil.copy(sources[kind], dest)
+            return dest
+
+    links = [("https://links.sgx.com/FileOpen/a.ashx?k=release", "20201029 - NetLink NBN - Media Release.pdf"),
+             ("https://links.sgx.com/FileOpen/b.ashx?k=slides", "Financial Results Presentation.pdf"),
+             ("https://links.sgx.com/FileOpen/c.ashx?k=results", "20201029 - NetLink NBN - Half Yearly Results.pdf")]
+    client = FakeClient()
+    pdf, scan, used, downloaded = choose_financial_pdf(client, links, out)
+    assert used.endswith("k=results") and pdf.name == "Half Yearly Results.pdf" and scan.found_all
+    assert client.got == ["results"], "stops once the results PDF holds all three statements"
+
+    # No financially named file: falls back to the content scan (presentation has the statements).
+    client = FakeClient()
+    _, _, used, _ = choose_financial_pdf(client, links[:2], out)
+    assert used.endswith("k=slides") and client.got == ["release", "slides"]
+
+
 def test_workbook_and_merge():
     meta = {"company_name": "ACME HOLDINGS LIMITED", "stock_code": "ACME", "currency": "SGD", "filing": "1H2026"}
     norm = extractor.normalise(FAKE)

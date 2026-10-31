@@ -48,8 +48,14 @@ def install_mocks():
     def screen(self, s, company=None, attachments=False):
         time.sleep(0.8)
         day = s.date_to.strftime("%Y-%m-%d")
-        files = lambda c: [{"name": f"{c} Results.pdf", "url": f"https://links.sgx.com/FileOpen/{c}_Results.ashx?App=Announcement&FileID=1",
-                            "from": "announcement-attachment-list"}] if attachments else None
+        def files(c):
+            if not attachments:
+                return None
+            names = [f"{c} Results.pdf"] if c != "D05" else [  # one filing with several attachments
+                "20261029 - Media Release.pdf", "20261029 Financial Results Presentation.pdf",
+                "20261029 - Half Yearly Results.pdf", "29/10/2026 18:24:53"]
+            return [{"name": n, "url": f"https://links.sgx.com/FileOpen/{c}_{i}.ashx?App=Announcement&FileID={i}",
+                     "from": "announcement-attachment-list"} for i, n in enumerate(names)]
         anns = [Announcement(t, n, c, f"https://links.sgx.com/1.0.0/corporate-announcements/MOCK{c}", f"{day} {h}", "ANNC17",
                              {"attachments": files(c)})
                 for c, n, h, t in issuers]
@@ -63,7 +69,7 @@ def install_mocks():
     def download(self, url, dest_dir):
         time.sleep(0.6)
         dest_dir.mkdir(parents=True, exist_ok=True)
-        out = dest_dir / "results.pdf"
+        out = dest_dir / (url.split("/FileOpen/")[-1].split(".ashx")[0] + ".pdf")
         shutil.copy(sample, out)
         return out
 
