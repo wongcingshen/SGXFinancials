@@ -90,10 +90,16 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict) -> tupl
     company = meta.get("company_name", "")
     currency = meta.get("currency", "")
 
-    for st, (title, rows) in T.STATEMENTS.items():
+    # A bank gets the bank layout; the newest filing decides if a workbook somehow has both.
+    fmt = next((r.get("format") for r in sorted(records, key=lambda r: r["period_end"], reverse=True)
+                if r.get("format")), meta.get("format") or "general")
+    for st, (title, _) in T.STATEMENTS.items():
+        rows = T.rows_for(st, fmt)
         ws = wb.create_sheet(title)
         recs = [r for r in records if r["statement"] == st]
-        recs.sort(key=lambda r: (r["period_end"], r["months"]), reverse=T.LATEST_FIRST)
+        # Group columns by length (full year, 9M, half year, quarter), latest first within each,
+        # so quarters and years aren't interleaved; balance sheet dates simply by date.
+        recs.sort(key=lambda r: (r["months"], r["period_end"]), reverse=T.LATEST_FIRST)
         _write_statement(ws, title, rows, recs, company, meta.get("stock_code", ""), currency)
 
     checks = run_checks(records)
@@ -167,6 +173,10 @@ CHECKS = [
     ("balance_sheet", "Shareholders' Equity + MI = Total Equity", ["shareholders_equity", "minority_interests"], "total_equity"),
     ("cash_flow", "Operating + Investing + Financing = Net Change", ["cf_net_operating", "cf_net_investing", "cf_net_financing"], "cf_net_change"),
     ("cash_flow", "Begin + Net Change + FX = End", ["cf_cash_begin", "cf_net_change", "cf_fx_effect"], "cf_cash_end"),
+    # banks
+    ("income_statement", "Interest Income + Interest Expense = Net Interest Income", ["interest_income", "interest_expense"], "net_interest_income"),
+    ("income_statement", "Operating Profit before Allowances + Allowances (+ associates, exceptional) = PBT",
+     ["operating_profit_pre_provisions", "allowances", "share_associates", "exceptional_items"], "profit_before_tax"),
 ]
 
 
@@ -177,6 +187,8 @@ def run_checks(records: list[dict]) -> list[dict]:
         for st, name, parts, total in CHECKS:
             if st != r["statement"]:
                 continue
+            if not any(k in v for k in (*parts, total)):
+                continue  # a check for the other format (bank vs general)
             if str(r.get("labels", {}).get(total, "")).startswith("computed"):
                 status, diff = "derived", None  # the total was calculated from these parts
             elif total not in v or parts[0] not in v or parts[1] not in v:
@@ -209,7 +221,7 @@ def _write_sources(ws, records):
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = HEAD_FILL
-    labels = {r.key: r.label for _, rows in T.STATEMENTS.values() for r in rows}
+    labels = T.labels()
     for r in records:
         for k in r["values"]:
             ws.append([r["statement"], period_label(r["period_end"], r["months"]), labels.get(k, k),

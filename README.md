@@ -43,6 +43,20 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    runs tie-out checks (assets = liabilities + equity, op + inv + fin = net change in cash, …)
    and **merges** new periods into an existing workbook so quarters/half-years/full years accumulate.
 
+**Banks** get their own layout: Interest Income, Interest Expense, Net Interest Income, Fee &
+Commission Income, Other Non-Interest Income, Operating Expenses, Operating Profit before
+Allowances, Allowances, then PBT to EPS; and a balance sheet of Cash & Central Bank Balances,
+Due from Banks, Investments, Loans & Advances, Deposits, Due to Banks, Borrowings and equity.
+The AI classifies each filing as `bank` or `general`; consolidated statements are preferred over
+standalone ones. Totals a bank doesn't print (net interest income, equity, total liabilities)
+are derived and marked "computed".
+
+**All figures are in '000** of the reporting currency (EPS in cents / paise). The AI reports the
+unit printed (units, thousands, lakhs, millions, crores, billions) and the program rescales; a
+filing that states no unit is taken as thousands. Each figure comes back tagged with the column
+it sits under, so a blank cell can't shift numbers into the wrong period, and period columns are
+grouped by length (full year, half year, quarter) with the latest first.
+
 **No cost of sales line?** Companies that present expenses by nature report no cost of sales or
 gross profit. The AI then extracts *Raw materials, consumables used and changes in inventories*,
 *Employee benefits expenses* and *Depreciation and amortisation*, and the program derives

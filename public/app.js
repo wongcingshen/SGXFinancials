@@ -530,7 +530,7 @@ function resultHtml(r) {
   const ordered = [...fail, ...r.checks.filter((c) => c.status !== "FAIL")];
   return `<div>
       <p class="block-title">Extracted</p>
-      <div class="kv"><span><b>${esc(nameCase(r.meta.company_name))}</b></span><span>${esc(r.meta.currency)} · ${esc(r.meta.basis || "Group")}</span>
+      <div class="kv"><span><b>${esc(nameCase(r.meta.company_name))}</b></span><span>${esc(r.meta.currency)} · ${esc(r.meta.basis || "Group")}${r.meta.format === "bank" ? " · bank format" : ""} · '000</span>
         <span>pages ${esc(r.meta.pages)}</span><span>${r.usage?.input_tokens ? `${r.usage.input_tokens.toLocaleString()} in / ${(r.usage.output_tokens || 0).toLocaleString()} out tokens` : "from cache, no tokens used"}</span>
         <span>read by ${esc(r.meta.model || "")}</span>${r.timings ? `<span>download &amp; scan ${r.timings.download_and_scan} s · AI ${r.timings.ai} s</span>` : ""}</div>
     </div>

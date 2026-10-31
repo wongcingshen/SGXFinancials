@@ -212,6 +212,10 @@ def score_page(text: str, page_no: int) -> PageScore:
         s += hits * 1.5
         s += min(numeric_ratio, 0.6) * 15  # statements are number-dense
         s -= neg * 6
+        if "consolidated" in top:
+            s += 2  # filings with both prefer the Group (consolidated) statements
+        elif "standalone" in top:
+            s -= 2
         scores[st] = round(s, 2)
 
     return PageScore(page_no, scores, round(numeric_ratio, 3), bool(text.strip()), title_hits)

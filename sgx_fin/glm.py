@@ -36,7 +36,7 @@ ZAI_MODELS = ["glm-5.3-flash", "glm-4.6v-flash"]  # the second is Z.ai's free vi
 NVIDIA_GUESSES = ["z-ai/glm-5.3-flash", "zai-org/glm-5.3-flash", "z-ai/glm-5-3-flash", "glm-5-3-flash"]
 GLM53_FLASH = re.compile(r"glm[-_]?5[._-]?3[-_]?flash", re.I)
 _listed: dict[str, list[str]] = {}
-UNITS = ("units", "thousands", "millions", "billions")
+UNITS = ("units", "thousands", "lakhs", "millions", "crores", "billions")
 STATEMENTS = tuple(T.STATEMENTS)
 
 
@@ -181,10 +181,11 @@ def _pages_content(urls: list[str], instruction: str) -> list:
 
 SKELETON = (
     'Return only one JSON object, no prose, shaped like:\n'
-    '{"company_name": str, "currency": "SGD", "unit": "units|thousands|millions|billions", "basis": "Group", '
+    '{"company_name": str, "format": "general|bank", "currency": "SGD", '
+    '"unit": "units|thousands|lakhs|millions|crores|billions", "basis": "Group", '
     '"notes": str, "income_statement": BLOCK, "balance_sheet": BLOCK, "cash_flow": BLOCK}\n'
-    'where BLOCK = {"page_numbers": [int], "periods": [{"label": str, "period_end": "YYYY-MM-DD", "months": int}], '
-    '"rows": [{"key": <template key>, "source_label": str, "values": [number or null, one per period]}]}'
+    'where BLOCK = {"page_numbers": [int], "periods": [{"col": int, "label": str, "period_end": "YYYY-MM-DD", '
+    '"months": int}], "rows": [{"key": <template key>, "source_label": str, "cells": [{"col": int, "value": number}]}]}'
 )
 
 LOCATE = ("Each image is one page of a company's results filing, numbered as labelled. Which pages hold the "
@@ -274,33 +275,43 @@ def number(v):
 
 def coerce(raw: dict) -> dict:
     """Shape GLM's answer like the schema-checked answers of the other providers."""
+    unit = str(raw.get("unit") or "").lower()
     out = {
         "company_name": str(raw.get("company_name") or ""),
+        "format": raw.get("format") if raw.get("format") in T.FORMATS else "general",
         "currency": str(raw.get("currency") or ""),
-        "unit": str(raw.get("unit") or "").lower() if str(raw.get("unit") or "").lower() in UNITS else "units",
+        "unit": unit if unit in UNITS else "thousands",
         "basis": str(raw.get("basis") or "Group"),
         "notes": str(raw.get("notes") or ""),
     }
-    if out["unit"] == "units" and str(raw.get("unit") or "").lower() not in UNITS:
-        out["notes"] = (out["notes"] + " Unit not stated; figures assumed to be in units.").strip()
+    if unit not in UNITS:
+        out["notes"] = (out["notes"] + " Unit not stated; figures taken as thousands.").strip()
     for st in STATEMENTS:
         block = raw.get(st) if isinstance(raw.get(st), dict) else {}
         keys = {r.key for r in T.data_rows(st)}
         periods = []
-        for p in block.get("periods") or []:
+        for i, p in enumerate(block.get("periods") or [], 1):
             if isinstance(p, dict):
                 try:
                     months = int(p.get("months") or 0)
                 except (TypeError, ValueError):
                     months = 0
-                periods.append({"label": str(p.get("label") or ""), "period_end": str(p.get("period_end") or ""), "months": months})
+                col = p.get("col") if isinstance(p.get("col"), int) else i
+                periods.append({"col": col, "label": str(p.get("label") or ""),
+                                "period_end": str(p.get("period_end") or ""), "months": months})
         rows = []
         for r in block.get("rows") or []:
             if not isinstance(r, dict) or r.get("key") not in keys:
                 continue
-            vals = r.get("values") if isinstance(r.get("values"), list) else []
-            rows.append({"key": r["key"], "source_label": str(r.get("source_label") or ""),
-                         "values": [number(v) for v in vals]})
+            if isinstance(r.get("cells"), list):
+                cells = [{"col": c.get("col"), "value": number(c.get("value"))} for c in r["cells"]
+                         if isinstance(c, dict) and isinstance(c.get("col"), int)]
+                rows.append({"key": r["key"], "source_label": str(r.get("source_label") or ""),
+                             "cells": [c for c in cells if c["value"] is not None]})
+            else:  # a plain list in column order
+                vals = r.get("values") if isinstance(r.get("values"), list) else []
+                rows.append({"key": r["key"], "source_label": str(r.get("source_label") or ""),
+                             "values": [number(v) for v in vals]})
         nums = [n for n in block.get("page_numbers") or [] if isinstance(n, int)]
         out[st] = {"page_numbers": nums, "periods": periods, "rows": rows}
     return out

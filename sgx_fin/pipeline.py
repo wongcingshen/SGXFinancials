@@ -127,6 +127,7 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
         "company_name": result.meta.get("company_name") or ex.data.get("company_name", ""),
         "currency": ex.data.get("currency", ""),
         "basis": ex.data.get("basis", ""),
+        "format": ex.data.get("format") if ex.data.get("format") in ("general", "bank") else "general",
         "notes": ex.data.get("notes", ""),
         "source_pdf": pdf.name,
         "pages": ",".join(map(str, pages)),

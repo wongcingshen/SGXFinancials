@@ -80,8 +80,9 @@ def test_gemini_schema_converts():
 
     sch = extractor.gemini_schema(extractor.SCHEMA)
     types.Schema.model_validate(sch)  # what response_schema accepts
-    vals = sch["properties"]["balance_sheet"]["properties"]["rows"]["items"]["properties"]["values"]
-    assert vals == {"type": "array", "items": {"type": "number", "nullable": True}}
+    cells = sch["properties"]["balance_sheet"]["properties"]["rows"]["items"]["properties"]["cells"]
+    assert cells["items"]["properties"]["col"] == {"type": "integer"}
+    assert "bank" in sch["properties"]["format"]["enum"]
     assert "additionalProperties" not in json.dumps(sch)
 
 
@@ -280,6 +281,56 @@ def test_ai_finds_the_statements_when_keywords_are_missing():
     assert score_page("STATEMENT OF STANDALONE AUDITED FINANCIAL RESULTS\nInterest earned 1,000 900\n"
                       "Interest expended 600 500\nNet Profit 300 250", 1).title_hits.get("income_statement")
     assert score_page("Statement of Assets and Liabilities\nDeposits 9,000\nAdvances 7,000", 1).title_hits.get("balance_sheet")
+
+
+def test_bank_in_crores_with_explicit_columns():
+    from sgx_fin import glm
+
+    cols = [(1, "Quarter ended 30.09.2026", "30.09.2026", 3), (2, "Quarter ended 30.06.2026", "30.06.2026", 3),
+            (3, "Quarter ended 30.09.2025", "30.09.2025", 3), (4, "Half year ended 30.09.2026", "30.09.2026", 6),
+            (5, "Half year ended 30.09.2025", "30.09.2025", 6), (6, "Year ended 31.03.2026", "31.03.2026", 12)]
+    periods = [{"col": c, "label": l, "period_end": d, "months": m} for c, l, d, m in cols]
+    cells = lambda *v: [{"col": i, "value": x} for i, x in enumerate(v, 1) if x is not None]  # noqa: E731
+    bank = {
+        "company_name": "BANK OF BARODA", "format": "bank", "currency": "INR", "unit": "crores", "basis": "Group", "notes": "",
+        "income_statement": {"page_numbers": [1], "periods": periods, "rows": [
+            {"key": "interest_income", "source_label": "Interest earned", "cells": cells(31000, 30000, 28000, 61000, 55000, 112000)},
+            {"key": "interest_expense", "source_label": "Interest expended", "cells": cells(-19000, -18500, -17000, -37500, -33000, -68000)},
+            # a blank cell in column 2: the rest must stay in their own columns
+            {"key": "other_non_interest_income", "source_label": "Other income", "cells": cells(4000, None, 3500, 7600, 6800, 14000)},
+            {"key": "profit_before_tax", "source_label": "Profit before tax", "cells": cells(6000, 5800, 5200, 11800, 10100, 21000)},
+        ]},
+        "balance_sheet": {"page_numbers": [2], "periods": [
+            {"col": 1, "label": "As at 30.09.2026", "period_end": "30.09.2026", "months": 6},  # months must become 0
+            {"col": 2, "label": "As at 31.03.2026", "period_end": "31.03.2026", "months": 0}], "rows": [
+            {"key": "customer_deposits", "source_label": "Deposits", "cells": cells(1300000, 1250000)},
+            {"key": "share_capital", "source_label": "Capital", "cells": cells(1034, 1034)},
+            {"key": "reserves", "source_label": "Reserves and surplus", "cells": cells(120000, 115000)},
+            {"key": "total_assets", "source_label": "Total", "cells": cells(1600000, 1550000)},
+        ]},
+        "cash_flow": {"page_numbers": [], "periods": [], "rows": []},
+    }
+    norm = extractor.normalise(bank)
+    inc, bs = norm["income_statement"], norm["balance_sheet"]
+    assert inc["values"]["interest_income"][0] == 310_000_000  # 31,000 crore = 310,000,000 thousand
+    assert inc["values"]["other_non_interest_income"] == [40_000_000, None, 35_000_000, 76_000_000, 68_000_000, 140_000_000]
+    assert inc["values"]["net_interest_income"][0] == 120_000_000 and inc["labels"]["net_interest_income"].startswith("computed")
+    assert [p["period_end"] for p in inc["periods"]][:2] == ["2026-09-30", "2026-06-30"]
+    assert [p["months"] for p in bs["periods"]] == [0, 0]
+    assert bs["values"]["total_liabilities"][0] == 16_000_000_000 - 1_210_340_000
+
+    data, checks = workbook_bytes(None, norm, {"company_name": "BANK OF BARODA", "currency": "INR", "format": "bank"})
+    wb = load_workbook(io.BytesIO(data))
+    col_a = [c.value for c in wb["Income Statement"]["A"] if c.value]
+    assert "Interest Income" in col_a and "Cost of Goods Sold" not in col_a
+    names = {c["check"] for c in checks}
+    assert not any(n.startswith("Revenue") for n in names), "general checks skipped for a bank"
+    assert any(n.startswith("Interest Income") for n in names)
+
+    # A unit that isn't stated is taken as thousands.
+    assert glm.coerce({"unit": ""})["unit"] == "thousands"
+    no_unit = json.loads(json.dumps(FAKE)); no_unit.pop("unit")
+    assert extractor.normalise(no_unit)["income_statement"]["values"]["revenue"][0] == 120512
 
 
 def test_workbook_and_merge():

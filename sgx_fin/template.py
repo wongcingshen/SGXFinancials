@@ -136,11 +136,68 @@ CASH_FLOW = [
     Row("free_cash_flow", "Free Cash Flow", "item", "Leave null; computed by the program as net operating cash flow + capex"),
 ]
 
-STATEMENTS = {
-    "income_statement": ("Income Statement", INCOME_STATEMENT),
-    "balance_sheet": ("Balance Sheet", BALANCE_SHEET),
-    "cash_flow": ("Cash Flow", CASH_FLOW),
+# Banks report interest income, deposits and loans rather than revenue, inventories and payables,
+# so they get their own income statement and balance sheet. The cash flow layout is shared.
+BANK_INCOME_STATEMENT = [
+    Row("interest_income", "Interest Income", "item", "Interest earned / interest income on advances, investments and balances with banks; positive"),
+    Row("interest_expense", "Interest Expense", "item", "Interest expended / interest expense on deposits and borrowings; negative"),
+    Row("net_interest_income", "Net Interest Income", "total", "Net interest income as printed; leave out if not printed"),
+    Row("fee_income", "Fee & Commission Income", "item", "Net fee and commission income"),
+    Row("other_non_interest_income", "Other Non-Interest Income", "item", "Trading, investment, insurance and other income (a bank's 'Other income'), excluding fees if shown separately"),
+    Row("total_operating_income", "Total Operating Income", "total", "Total operating income NET of interest expense, if printed. Not an Indian bank's 'Total Income', which includes gross interest earned"),
+    Row("staff_costs", "Staff Costs", "item", "Employee costs / payments to and provisions for employees; negative"),
+    Row("other_operating_expenses_bank", "Other Operating Expenses", "item", "Other operating expenses (premises, depreciation, other); negative"),
+    Row("total_operating_expenses", "Total Operating Expenses", "total", "Operating expenses total; negative"),
+    Row("operating_profit_pre_provisions", "Operating Profit before Allowances", "total", "Operating profit before provisions and contingencies"),
+    Row("allowances", "Allowances / Provisions for Credit Losses", "item", "Provisions (other than tax) and contingencies, allowances for credit and other losses; negative"),
+    Row("share_associates", "Share of Results of Associates", "item", "Share of profit/(loss) of associates and joint ventures"),
+    Row("exceptional_items", "Exceptional Items", "item", "Exceptional / extraordinary items on the face of the statement"),
+    Row("profit_before_tax", "Profit Before Tax", "total", "Profit/(loss) before tax"),
+    Row("tax", "Taxation", "item", "Tax expense; negative"),
+    Row("profit_after_tax", "Profit After Tax", "total", "Net profit for the period"),
+    Row("pat_shareholders", "Profit Attributable to Shareholders", "total", "Attributable to owners / equity holders of the bank (Group)"),
+    Row("pat_minority", "Minority Interests", "item", "Attributable to non-controlling / minority interest"),
+    Row("eps_basic", "EPS - Basic (cents)", "item", "Basic EPS in the currency's minor unit (cents, paise: x100 if printed in dollars / rupees)"),
+    Row("eps_diluted", "EPS - Diluted (cents)", "item", "Diluted EPS in the currency's minor unit"),
+]
+
+BANK_BALANCE_SHEET = [
+    Row("h_assets", "Assets", "header"),
+    Row("cash_central_bank", "Cash & Balances with Central Banks", "item", "Cash in hand and balances with the central bank (e.g. Reserve Bank of India, MAS)"),
+    Row("due_from_banks", "Due from Banks / Placements", "item", "Balances with banks, money at call and short notice, placements with banks"),
+    Row("bank_investments", "Investments & Securities", "item", "Investments, government and other securities"),
+    Row("loans_advances", "Loans & Advances to Customers", "item", "Advances / loans and advances to customers, net of allowances"),
+    Row("ppe", "Fixed Assets", "item", "Fixed assets / property and equipment"),
+    Row("other_assets", "Other Assets", "item", "Other assets, derivatives, goodwill and intangibles"),
+    Row("total_assets", "Total Assets", "total", "Total assets (an Indian bank's 'Total' of assets)"),
+    Row("h_liabilities", "Liabilities", "header"),
+    Row("customer_deposits", "Deposits from Customers", "item", "Deposits"),
+    Row("due_to_banks", "Due to Banks", "item", "Deposits and balances of banks, if separate from customer deposits"),
+    Row("bank_borrowings", "Borrowings & Debt Issued", "item", "Borrowings, debt securities, subordinated debt"),
+    Row("other_liabilities", "Other Liabilities & Provisions", "item", "Other liabilities and provisions, derivatives"),
+    Row("total_liabilities", "Total Liabilities", "total", "Printed total; leave out if not printed"),
+    Row("h_equity", "Shareholders' Equity", "header"),
+    Row("share_capital", "Share Capital", "item", "Capital"),
+    Row("reserves", "Reserves", "item", "Reserves and surplus / retained earnings + other reserves"),
+    Row("perpetual_securities", "Perpetual Securities", "item", "Additional tier 1 / perpetual capital securities in equity"),
+    Row("shareholders_equity", "Total Shareholders' Equity", "total", "Equity attributable to owners; leave out if not printed"),
+    Row("minority_interests", "Minority Interests", "item", "Non-controlling / minority interest"),
+    Row("total_equity", "Total Equity", "total", "Total equity; leave out if not printed"),
+]
+
+FORMATS = {
+    "general": {
+        "income_statement": ("Income Statement", INCOME_STATEMENT),
+        "balance_sheet": ("Balance Sheet", BALANCE_SHEET),
+        "cash_flow": ("Cash Flow", CASH_FLOW),
+    },
+    "bank": {
+        "income_statement": ("Income Statement", BANK_INCOME_STATEMENT),
+        "balance_sheet": ("Balance Sheet", BANK_BALANCE_SHEET),
+        "cash_flow": ("Cash Flow", CASH_FLOW),
+    },
 }
+STATEMENTS = FORMATS["general"]  # statement ids and order are the same in every format
 
 # Units used in the workbook. ShareInvestor shows figures in thousands of the
 # reporting currency; EPS stays in cents whatever this is set to.
@@ -151,5 +208,16 @@ OUTPUT_UNIT_LABEL = "'000"
 LATEST_FIRST = True
 
 
-def data_rows(statement: str) -> list[Row]:
-    return [r for r in STATEMENTS[statement][1] if r.kind != "header"]
+def data_rows(statement: str, fmt: str | None = None) -> list[Row]:
+    """Rows that hold numbers; with no format, every format's rows (unique keys)."""
+    formats = [fmt] if fmt else list(FORMATS)
+    rows = {r.key: r for f in formats for r in FORMATS[f][statement][1] if r.kind != "header"}
+    return list(rows.values())
+
+
+def rows_for(statement: str, fmt: str | None) -> list[Row]:
+    return FORMATS.get(fmt or "general", FORMATS["general"])[statement][1]
+
+
+def labels() -> dict[str, str]:
+    return {r.key: r.label for f in FORMATS.values() for _, rows in f.values() for r in rows}

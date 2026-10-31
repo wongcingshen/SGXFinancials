@@ -15,6 +15,7 @@ import io
 import json
 import os
 import time
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,7 +30,9 @@ CLAUDE_DEFAULT = "claude-opus-5-5"
 # GEMINI_MODEL: other apps sharing the Vercel team's variables, such as TravelFriend, use that.)
 GEMINI_KEY_VARS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GEMINI_KEY")
 GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest"]
-UNIT_FACTORS = {"units": 1, "thousands": 1_000, "millions": 1_000_000, "billions": 1_000_000_000}
+UNIT_FACTORS = {"units": 1, "thousands": 1_000, "lakhs": 100_000, "millions": 1_000_000,
+                "crores": 10_000_000, "billions": 1_000_000_000}
+DEFAULT_UNIT = "thousands"  # when a filing doesn't say: SGX statements are almost always in '000
 
 
 def _statement_schema(statement: str) -> dict:
@@ -40,14 +43,16 @@ def _statement_schema(statement: str) -> dict:
             "page_numbers": {"type": "array", "items": {"type": "integer"}},
             "periods": {
                 "type": "array",
+                "description": "The numeric columns of the table used, left to right; col 1 is the first",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "label": {"type": "string"},
+                        "col": {"type": "integer", "description": "1-based column number"},
+                        "label": {"type": "string", "description": "column heading as printed"},
                         "period_end": {"type": "string", "description": "YYYY-MM-DD"},
-                        "months": {"type": "integer", "description": "0 for balance sheet dates"},
+                        "months": {"type": "integer", "description": "3, 6, 9 or 12; 0 for balance sheet dates"},
                     },
-                    "required": ["label", "period_end", "months"],
+                    "required": ["col", "label", "period_end", "months"],
                     "additionalProperties": False,
                 },
             },
@@ -58,9 +63,18 @@ def _statement_schema(statement: str) -> dict:
                     "properties": {
                         "key": {"type": "string", "enum": keys},
                         "source_label": {"type": "string"},
-                        "values": {"type": "array", "items": {"type": ["number", "null"]}},
+                        "cells": {
+                            "type": "array",
+                            "description": "one entry per column that has a figure on this line",
+                            "items": {
+                                "type": "object",
+                                "properties": {"col": {"type": "integer"}, "value": {"type": "number"}},
+                                "required": ["col", "value"],
+                                "additionalProperties": False,
+                            },
+                        },
                     },
-                    "required": ["key", "source_label", "values"],
+                    "required": ["key", "source_label", "cells"],
                     "additionalProperties": False,
                 },
             },
@@ -74,15 +88,17 @@ SCHEMA = {
     "type": "object",
     "properties": {
         "company_name": {"type": "string"},
-        "currency": {"type": "string", "description": "ISO code, e.g. SGD, USD, RMB"},
+        "format": {"type": "string", "enum": list(T.FORMATS),
+                   "description": "bank for banks (interest earned/expended, deposits, advances); general otherwise"},
+        "currency": {"type": "string", "description": "ISO code, e.g. SGD, USD, RMB, INR"},
         "unit": {"type": "string", "enum": list(UNIT_FACTORS)},
-        "basis": {"type": "string", "description": "Group (consolidated) or Company"},
+        "basis": {"type": "string", "description": "Group (consolidated), Standalone or Company"},
         "income_statement": _statement_schema("income_statement"),
         "balance_sheet": _statement_schema("balance_sheet"),
         "cash_flow": _statement_schema("cash_flow"),
         "notes": {"type": "string"},
     },
-    "required": ["company_name", "currency", "unit", "basis",
+    "required": ["company_name", "format", "currency", "unit", "basis",
                  "income_statement", "balance_sheet", "cash_flow", "notes"],
     "additionalProperties": False,
 }
@@ -90,31 +106,34 @@ SCHEMA = {
 
 def _template_text() -> str:
     parts = []
-    for st, (title, rows) in T.STATEMENTS.items():
-        lines = [f"## {st} ({title})"]
-        for r in rows:
-            if r.kind == "header":
-                continue
-            lines.append(f"- {r.key}: {r.label}" + (f" — {r.hint}" if r.hint else ""))
-        parts.append("\n".join(lines))
+    for fmt, statements in T.FORMATS.items():
+        for st, (title, rows) in statements.items():
+            if fmt != "general" and rows is T.FORMATS["general"][st][1]:
+                continue  # shared layout, already listed
+            lines = [f"## format {fmt}: {st} ({title})"]
+            for r in rows:
+                if r.kind != "header":
+                    lines.append(f"- {r.key}: {r.label}" + (f" — {r.hint}" if r.hint else ""))
+            parts.append("\n".join(lines))
     return "\n\n".join(parts)
 
 
 SYSTEM = """You transcribe primary financial statements from SGX-listed company filings into a fixed template.
 
 Rules:
-- Use the GROUP (consolidated) columns. Ignore Company-only columns when both are shown.
-- Copy numbers exactly as printed, in the unit the statement states (report that unit once in `unit`). Do not rescale.
+- `format`: "bank" for banks (interest earned / interest expended, deposits, advances or loans); "general" for everyone else. Use only that format's keys (the cash flow keys are shared).
+- Use the GROUP (consolidated) statements and columns. When a filing has both standalone and consolidated statements, use the consolidated ones; ignore Company-only / standalone columns.
+- Copy numbers exactly as printed, in the unit the statement states (report it once in `unit`: units, thousands, lakhs, millions, crores or billions; "S$'000" = thousands, "₹ in crore" = crores). If no unit is stated, use thousands. Do not rescale.
 - Parentheses mean negative. Expenses, costs, tax expense, cash outflows, treasury shares are negative numbers.
-- EPS goes in cents (multiply by 100 if printed in dollars).
-- `periods` lists the statement's numeric columns left to right as printed (current period first if that is the layout); every row's `values` has one entry per period in the same order. Use null where a cell is blank or "-".
-- Income statement and cash flow periods are durations (months = 3, 6, 9 or 12). Balance sheet periods are dates (months = 0).
+- EPS goes in the currency's minor unit: cents (or paise), multiplying by 100 if printed in dollars (or rupees).
+- Columns: `periods` lists the numeric columns of the table you used, left to right, numbered `col` 1, 2, 3... Every figure goes in `cells` as {col, value} with the column it sits under, so check the column of every number. Leave a column out of `cells` when the cell is blank or "-". Never shift numbers between columns.
+- Income statement and cash flow periods are durations: months = 3 (quarter ended), 6 (half year / six months ended), 9 (nine months ended) or 12 (year ended). Balance sheet columns are dates: months = 0. period_end is the column's end date as YYYY-MM-DD.
 - Map each template key to the line the company reports. If a template line is a sum of several reported lines (e.g. "Reserves" = retained earnings + other reserves), add them and list the source labels joined with " + ". If a company line has no matching key, fold it into the closest "Other ..." key.
 - Only include a key if the filing gives the figure (or it is a direct sum of shown figures). Omit keys you cannot support; never invent numbers.
-- Expenses by nature: when the income statement has no cost of sales line and lists expenses by nature instead, fill raw_materials (raw materials, consumables used and changes in inventories), employee_benefits and depreciation_amortisation from the face of the statement, and leave cost_of_sales and gross_profit out unless they are printed. The program derives them.
-- Totals (gross profit, total assets, net cash from operating activities...) must be the printed totals, not your own arithmetic, when they are printed.
+- Expenses by nature (general format): when the income statement has no cost of sales line and lists expenses by nature instead, fill raw_materials (raw materials, consumables used and changes in inventories), employee_benefits and depreciation_amortisation from the face of the statement, and leave cost_of_sales and gross_profit out unless they are printed. The program derives them.
+- Totals (gross profit, net interest income, total assets, net cash from operating activities...) must be the printed totals, not your own arithmetic, when they are printed; leave them out when not printed.
 - `page_numbers` are the page numbers within the attached excerpt (1-based) the statement came from.
-- Put caveats (restatements, unusual presentation, bank/REIT format) in `notes`.
+- Put caveats (restatements, unusual presentation, REIT format, standalone figures used) in `notes`.
 
 Template keys:
 """ + _template_text()
@@ -402,24 +421,83 @@ def _derive_gross_profit(values: dict, labels: dict, n: int) -> None:
         labels["gross_profit"] = "computed: revenue - derived cost of goods sold"
 
 
-def normalise(data: dict) -> dict:
-    """Rescale to the template's output unit and key rows by template key.
+def _derive_bank(st: str, values: dict, labels: dict, n: int) -> None:
+    """Bank totals some filings don't print (Indian banks rarely print equity or total liabilities)."""
+    col = lambda k: values.get(k) or [None] * n  # noqa: E731
+    has = lambda k: any(v is not None for v in values.get(k, []))  # noqa: E731
 
-    Returns {statement: {"periods": [...], "values": {key: [..]}, "labels": {key: str}}}.
+    def derive(key, label, fn):
+        vals = [fn(i) for i in range(n)]
+        if not has(key) and any(v is not None for v in vals):
+            values[key] = [None if v is None else round(v, 3) for v in vals]
+            labels[key] = f"computed: {label}"
+
+    def total(*keys):
+        return lambda i: None if col(keys[0])[i] is None else sum(col(k)[i] or 0 for k in keys)
+
+    if st == "income_statement":
+        derive("net_interest_income", "interest income + interest expense",
+               lambda i: None if col("interest_income")[i] is None or col("interest_expense")[i] is None
+               else col("interest_income")[i] + col("interest_expense")[i])
+    if st == "balance_sheet":
+        derive("shareholders_equity", "share capital + reserves (+ perpetual securities)",
+               lambda i: None if col("share_capital")[i] is None or col("reserves")[i] is None
+               else total("share_capital", "reserves", "perpetual_securities")(i))
+        derive("total_equity", "shareholders' equity + minority interests", total("shareholders_equity", "minority_interests"))
+        derive("total_liabilities", "total assets - total equity",
+               lambda i: None if col("total_assets")[i] is None or col("total_equity")[i] is None
+               else col("total_assets")[i] - col("total_equity")[i])
+
+
+def iso_date(text: str) -> str:
+    """2026-09-30 / 30.09.2026 / 30/09/2026 / 30 Sep 2026 / Sep 30, 2026 -> 2026-09-30 (else unchanged)."""
+    s = str(text or "").strip()
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
+                "%d.%m.%y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return s
+
+
+def _row_values(row: dict, cols: list[int]) -> list:
+    """A row's figures in period order: from explicit {col, value} cells, or a plain list (older answers)."""
+    if "cells" in row:
+        by_col = {c.get("col"): c.get("value") for c in row.get("cells") or [] if isinstance(c, dict)}
+        return [by_col.get(c) for c in cols]
+    vals = list(row.get("values") or [])
+    return (vals + [None] * len(cols))[:len(cols)]
+
+
+def normalise(data: dict) -> dict:
+    """Rescale to the template's output unit ('000) and key rows by template key.
+
+    Returns {statement: {"periods": [...], "values": {key: [..]}, "labels": {key: str}, "format": str}}.
     """
-    factor = UNIT_FACTORS.get(data.get("unit", "units"), 1) / T.OUTPUT_UNIT
+    fmt = data.get("format") if data.get("format") in T.FORMATS else "general"
+    factor = UNIT_FACTORS.get(data.get("unit") or DEFAULT_UNIT, UNIT_FACTORS[DEFAULT_UNIT]) / T.OUTPUT_UNIT
     out = {}
     for st in T.STATEMENTS:
         block = data.get(st) or {"periods": [], "rows": []}
-        n = len(block["periods"])
+        periods = []
+        for i, p in enumerate(block.get("periods") or [], 1):
+            months = 0 if st == "balance_sheet" else int(p.get("months") or 0)
+            periods.append({**p, "col": p.get("col") or i, "period_end": iso_date(p.get("period_end")), "months": months})
+        cols = [p["col"] for p in periods]
+        n = len(periods)
         values, labels = {}, {}
-        for row in block["rows"]:
-            vals = (row["values"] + [None] * n)[:n]
+        for row in block.get("rows") or []:
+            vals = _row_values(row, cols)
             if row["key"] not in ("eps_basic", "eps_diluted"):
                 vals = [None if v is None else round(v * factor, 3) for v in vals]
+            if row["key"] in values:  # the same line twice: keep the first figure per column
+                vals = [a if a is not None else b for a, b in zip(values[row["key"]], vals)]
             values[row["key"]] = vals
-            labels[row["key"]] = row["source_label"]
-        if st == "income_statement":
+            labels.setdefault(row["key"], row["source_label"])
+        if fmt == "bank":
+            _derive_bank(st, values, labels, n)
+        elif st == "income_statement":
             _derive_gross_profit(values, labels, n)
         if st == "cash_flow" and "cf_net_operating" in values:
             capex = values.get("cf_capex", [None] * n)
@@ -428,5 +506,5 @@ def normalise(data: dict) -> dict:
                 for o, c in zip(values["cf_net_operating"], capex)
             ]
             labels["free_cash_flow"] = "computed: net operating cash flow + capex"
-        out[st] = {"periods": block["periods"], "values": values, "labels": labels}
+        out[st] = {"periods": periods, "values": values, "labels": labels, "format": fmt}
     return out
