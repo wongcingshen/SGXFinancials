@@ -19,6 +19,7 @@ const MAX_UPLOAD = 4_000_000;
 
 const state = {
   health: null,
+  ai: "AI",
   effort: store.get("sgxf-effort", "high"),
   mergeFile: null,
   announcements: [],
@@ -100,11 +101,14 @@ async function loadHealth() {
     const h = await r.json();
     if (!r.ok) throw new Error(h.error || `HTTP ${r.status}`);
     state.health = h;
-    pill.className = "status-pill " + (h.anthropic_key ? "ok" : "warn");
-    $("#statusText").textContent = h.anthropic_key ? "Claude ready" : "AI key missing";
+    state.ai = h.provider_label || "AI";
+    document.querySelectorAll("[data-ai]").forEach((el) => { el.textContent = state.ai; });
+    if ($("#results .steps")) renderIntro();
+    pill.className = "status-pill " + (h.ai_key ? "ok" : "warn");
+    $("#statusText").textContent = h.ai_key ? `${state.ai} ready` : "AI key missing";
     $("#serverInfo").innerHTML = `${icon("info")}<div><b>Server</b><br>
-      Model: <span class="mono">${esc(h.model)}</span><br>
-      Anthropic key: ${h.anthropic_key ? "configured" : "<b>missing</b> — add ANTHROPIC_API_KEY in Vercel"}<br>
+      Model: <span class="mono">${esc(h.model || "—")}</span><br>
+      AI: ${h.ai_key ? `${esc(state.ai)} (key configured)` : "<b>no key</b> — add GEMINI_API_KEY in Vercel"}<br>
       App password: ${h.password_required ? "required" : "not set (anyone with the link can run extractions)"}<br>
       SGX token: ${h.sgx_token ? "configured" : "not set (only needed if SGX refuses requests)"}</div>`;
   } catch (e) {
@@ -133,7 +137,7 @@ function renderIntro() {
       <ol class="steps">
         <li><span class="badge">1</span><span><strong>Screen</strong> <span class="muted">— the same date and ANNC17 filter as the SGX announcements page.</span></span></li>
         <li><span class="badge">2</span><span><strong>Scan</strong> <span class="muted">— a keyword scan finds the income statement, balance sheet and cash flow pages. No AI, no cost.</span></span></li>
-        <li><span class="badge">3</span><span><strong>Extract</strong> <span class="muted">— Claude reads only those pages and fills a ShareInvestor-style workbook, with tie-out checks.</span></span></li>
+        <li><span class="badge">3</span><span><strong>Extract</strong> <span class="muted">— ${esc(state.ai)} reads only those pages and fills a ShareInvestor-style workbook, with tie-out checks.</span></span></li>
       </ol>
     </div>`;
 }
@@ -211,10 +215,10 @@ async function screen(ev) {
 }
 
 // ------------------------------------------------------------------ run sheet
-const STEPS = ["Download", "Keyword scan", "Claude reads", "Workbook"];
+const stepNames = () => ["Download", "Keyword scan", `${state.ai} reads`, "Workbook"];
 
 function setSteps(active, { failed = false, scanOnly = false } = {}) {
-  const steps = scanOnly ? STEPS.slice(0, 2) : STEPS;
+  const steps = scanOnly ? stepNames().slice(0, 2) : stepNames();
   const el = $("#runSteps");
   el.style.gridTemplateColumns = `repeat(${steps.length}, 1fr)`;
   el.innerHTML = steps.map((s, i) => {
@@ -248,7 +252,7 @@ function scanHtml(scan, pages) {
       <div class="statements">${rows}</div>
       ${strip}
       <p class="muted" style="margin:10px 0 0;font-size:13px">${esc(scan.pdf)} · ${scan.page_count} pages${scan.attachments.length > 1 ? ` · picked from ${scan.attachments.length} attachments` : ""}${
-        pages?.length ? ` · ${pages.length} page${pages.length === 1 ? "" : "s"} go to Claude` : ""}</p>
+        pages?.length ? ` · ${pages.length} page${pages.length === 1 ? "" : "s"} go to ${esc(state.ai)}` : ""}</p>
     </div>
     ${img.size ? `<div class="notice">${icon("alert")}<div>${img.size} page${img.size === 1 ? " has" : "s have"} no text layer (scanned images), so the keyword scan can’t read ${img.size === 1 ? "it" : "them"}. If a statement is missing, enter its pages below.</div></div>` : ""}`;
 }
@@ -273,7 +277,7 @@ function resultHtml(r) {
           <span class="tag ${c.status === "PASS" ? "pass" : c.status === "FAIL" ? "fail" : "na"}">${c.status === "n/a" ? "n/a" : c.status.toLowerCase()}</span></div>`).join("")}</div>
       </details>
     </div>
-    ${r.meta.notes ? `<div class="notice info">${icon("sparkles")}<div><b>Claude’s notes</b><br>${esc(r.meta.notes)}</div></div>` : ""}`;
+    ${r.meta.notes ? `<div class="notice info">${icon("sparkles")}<div><b>${esc(state.ai)}’s notes</b><br>${esc(r.meta.notes)}</div></div>` : ""}`;
 }
 
 function rerunHtml(job) {
@@ -331,7 +335,7 @@ async function run(job, mode) {
   }
 
   setSteps(2);
-  stage.insertAdjacentHTML("beforeend", `<div class="notice info" id="aiWait">${icon("sparkles")}<div>Claude is reading ${scanRes.pages.length} pages. This usually takes one to three minutes.</div></div>`);
+  stage.insertAdjacentHTML("beforeend", `<div class="notice info" id="aiWait">${icon("sparkles")}<div>${esc(state.ai)} is reading ${scanRes.pages.length} pages. This usually takes one to three minutes.</div></div>`);
   let res;
   try {
     res = await api("/api/process?op=process", { method: "POST", body: formData(job, false, pages) });

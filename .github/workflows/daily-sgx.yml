@@ -36,6 +36,7 @@ jobs:
 
       - name: Screen and extract
         env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SGX_AUTH_TOKEN: ${{ secrets.SGX_AUTH_TOKEN }}
           URL: ${{ inputs.url }}
@@ -50,8 +51,8 @@ jobs:
           fi
           args=("${url_arg[@]}")
           if [ -n "$COMPANY" ]; then args+=(--company "$COMPANY"); else args+=(--watchlist watchlist.txt); fi
-          if [ "$DRY_RUN" = "true" ] || [ -z "$ANTHROPIC_API_KEY" ]; then
-            [ -z "$ANTHROPIC_API_KEY" ] && echo "::warning::ANTHROPIC_API_KEY secret not set - scan only"
+          if [ "$DRY_RUN" = "true" ] || [ -z "$GEMINI_API_KEY$ANTHROPIC_API_KEY" ]; then
+            [ -z "$GEMINI_API_KEY$ANTHROPIC_API_KEY" ] && echo "::warning::No GEMINI_API_KEY secret - scan only"
             args+=(--dry-run)
           fi
           python -m sgx_fin run "${args[@]}"

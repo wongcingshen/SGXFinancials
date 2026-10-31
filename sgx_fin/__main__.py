@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--company", help="filter by issuer name substring or stock code")
 
     def ai_args(p):
-        p.add_argument("--model", default=extractor.DEFAULT_MODEL)
+        p.add_argument("--model", default=None, help="default: GEMINI_MODEL / CLAUDE_MODEL or the provider default")
         p.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
         p.add_argument("--dry-run", action="store_true", help="scan pages only, no AI call")
         p.add_argument("--out", default="output", help="folder for workbooks")

@@ -36,7 +36,7 @@ def pick_best_pdf(pdfs: list[Path]) -> tuple[Path, ScanResult] | None:
 
 
 def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | None = None,
-                model: str = extractor.DEFAULT_MODEL, effort: str = "high",
+                model: str | None = None, effort: str = "high",
                 dry_run: bool = False, meta: dict | None = None,
                 cache_dir: Path | None = None) -> Result:
     scan = scan or scan_pdf(pdf)

@@ -32,7 +32,8 @@ def install_mocks():
     from sgx_fin.sgx_client import Announcement, SGXClient
     from test_offline import FAKE
 
-    os.environ.setdefault("ANTHROPIC_API_KEY", "mock")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        os.environ.setdefault("GEMINI_API_KEY", "mock")
     sample = ROOT / "tests" / "sample_results.pdf"
     issuers = [
         ("D05", "DBS GROUP HOLDINGS LTD", "18:02", "Financial Statements and Related Announcement::Third Quarter Results"),
@@ -66,7 +67,7 @@ def install_mocks():
     def extract(pdf, pages, **kw):
         time.sleep(2.5)
         data = {**FAKE, "notes": "Mock extraction from the sample PDF; figures are illustrative."}
-        return extractor.Extraction(data, "claude-opus-5-5 (mock)", {"input_tokens": 6120, "output_tokens": 2310})
+        return extractor.Extraction(data, "mock " + extractor.default_model(), {"input_tokens": 6120, "output_tokens": 2310})
 
     SGXClient.screen, SGXClient.attachments, SGXClient.download = screen, attachments, download
     pipeline.extractor.extract = extract

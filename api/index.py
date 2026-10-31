@@ -6,10 +6,11 @@ Routes (the operation is also accepted as ?op=health|screen|process on any path)
   POST /api/process                   scan (+ extract) one filing, return workbook
 
 Environment variables (Vercel > Project > Settings > Environment Variables)
-  ANTHROPIC_API_KEY   required for extraction
+  GEMINI_API_KEY      AI key for extraction (or ANTHROPIC_API_KEY to use Claude)
   APP_PASSWORD        recommended: callers must send it as X-App-Password
   SGX_AUTH_TOKEN      only if api.sgx.com starts rejecting anonymous requests
-  CLAUDE_MODEL        optional override (default claude-opus-5-5)
+  GEMINI_MODEL        optional: pin a Gemini model (CLAUDE_MODEL for Claude)
+  AI_PROVIDER         optional: gemini | anthropic, when both keys are set
 """
 
 from __future__ import annotations
@@ -82,10 +83,12 @@ def dispatch(path: str):
 @api("health", "GET", public=True)
 def health():
     return jsonify(
-        anthropic_key=bool(os.environ.get("ANTHROPIC_API_KEY")),
+        ai_key=extractor.provider() is not None,
+        provider=extractor.provider(),
+        provider_label=extractor.provider_label(),
         password_required=bool(os.environ.get("APP_PASSWORD")),
         sgx_token=bool(os.environ.get("SGX_AUTH_TOKEN")),
-        model=os.environ.get("CLAUDE_MODEL", extractor.DEFAULT_MODEL),
+        model=extractor.default_model() if extractor.provider() else None,
     )
 
 
@@ -148,10 +151,9 @@ def process():
                        message=None if chosen else "No statement pages found; pass pages manually.")
 
     # 3. AI extraction on the selected pages only, then merge into the uploaded workbook (if any).
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return jsonify(error="ANTHROPIC_API_KEY is not configured on the server"), 500
+    if not extractor.provider():
+        return jsonify(error="No AI key on the server: add GEMINI_API_KEY in Vercel"), 500
     res = process_pdf(pdf, scan=scan, pages=chosen, meta=meta,
-                      model=os.environ.get("CLAUDE_MODEL", extractor.DEFAULT_MODEL),
                       effort=f.get("effort", "high"), cache_dir=WORK)
     existing = request.files["workbook"].read() if request.files.get("workbook") else None
     data, checks = workbook_bytes(existing, res.normalised, res.meta)

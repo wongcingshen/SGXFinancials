@@ -10,7 +10,7 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
                                                            ▼
                      Excel (Income Statement / Balance Sheet / Cash Flow / Checks / Source Map)
                                                            ▲
-                                     Claude reads just those pages ──┘
+                         Gemini (or Claude) reads just those pages ──┘
 ```
 
 ## How it works
@@ -26,7 +26,7 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    commentary and contents pages. Picks the best attachment and the 1–3 pages for each statement,
    including continuation pages.
 4. **AI extraction** (`sgx_fin/extractor.py`): only the selected pages are cut into a small PDF
-   and sent to Claude (`claude-opus-5-5`) with a strict JSON schema built from the template, so
+   and sent to the AI with a strict JSON schema built from the template, so
    every number lands on a known line. Group (consolidated) figures only, with the company's own label kept for audit.
 5. **Excel** (`sgx_fin/excel_writer.py`): rescales to `'000`, writes ShareInvestor-style sheets,
    runs tie-out checks (assets = liabilities + equity, op + inv + fin = net change in cash, …)
@@ -44,11 +44,11 @@ yellow, Fraunces + Outfit, rounded cards, one accent colour per company):
 - **Screen**: pick From / To dates and an optional company, or paste an SGX page URL. The exact
   SGX screening URL is shown. `/?url=<SGX page URL>` deep-links straight into a screen.
 - **Announcement cards**: one per filing, with **Scan** (keyword scan only, free) and **Extract**.
-- **Run sheet**: real progress (Download → Keyword scan → Claude reads → Workbook), the pages the
-  scan chose per statement with a page map, tie-out checks, Claude's notes and the download.
+- **Run sheet**: real progress (Download → Keyword scan → Gemini reads → Workbook), the pages the
+  scan chose per statement with a page map, tie-out checks, the AI's notes and the download.
   "Wrong pages?" re-runs with pages you choose.
 - **Process a filing**: an SGX announcement/PDF link or a PDF upload.
-- **Settings**: app password, how hard Claude reads (effort), and a workbook to merge the next
+- **Settings**: app password, how hard the AI reads (thinking level), and a workbook to merge the next
   extraction into.
 
 Preview it locally without SGX access or an API key:
@@ -66,10 +66,11 @@ python tests/dev_server.py --mock      # demo data; drop --mock for the real thi
 
    | Variable | Required | Purpose |
    |---|---|---|
-   | `ANTHROPIC_API_KEY` | yes | Claude API key for extraction |
+   | `GEMINI_API_KEY` | yes (or `ANTHROPIC_API_KEY`) | Gemini API key for extraction |
    | `APP_PASSWORD` | strongly recommended | Anyone with the URL could otherwise spend your API credits |
    | `SGX_AUTH_TOKEN` | only if needed | See *SGX token* below |
-   | `CLAUDE_MODEL` | no | Override the model (default `claude-opus-5-5`) |
+   | `GEMINI_MODEL` | no | Pin a model. Default: first available of `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-flash-latest`, `gemini-2.5-flash`. Try `gemini-3.1-pro-preview` for hard filings |
+   | `ANTHROPIC_API_KEY` / `CLAUDE_MODEL` | no | Use Claude (`claude-opus-5-5`) instead; with both keys set, `AI_PROVIDER=gemini\|anthropic` picks |
 
 3. Deploy. Open the site, enter the password, pick a date and click **Screen**, then
    **Scan** (free, keyword scan only) or **Extract** (AI) on any announcement.
@@ -83,7 +84,7 @@ your previous workbook in **Options** to merge new periods into it.
 
 `.github/workflows/daily-sgx.yml` runs on weekdays at 23:30 SGT:
 
-1. Add repo secrets: **Settings → Secrets and variables → Actions** → `ANTHROPIC_API_KEY`
+1. Add repo secrets: **Settings → Secrets and variables → Actions** → `GEMINI_API_KEY`
    (and `SGX_AUTH_TOKEN` if needed).
 2. List the companies to track in `watchlist.txt` (stock codes or name fragments).
 3. Each run screens that day's `ANNC17` announcements, extracts watchlist companies and commits
@@ -96,7 +97,7 @@ With an empty watchlist it only logs the day's announcements, so it never spends
 
 ```bash
 pip install -r requirements.txt
-export ANTHROPIC_API_KEY=...
+export GEMINI_API_KEY=...
 
 # list financial-results announcements for a screen
 python -m sgx_fin screen "https://www.sgx.com/stock-exchange/company-announcements?from=20261030&to=20261030&ANNC=ANNC17"

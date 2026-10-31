@@ -75,6 +75,16 @@ def test_schema_is_json():
     assert "revenue" in extractor.SCHEMA["properties"]["income_statement"]["properties"]["rows"]["items"]["properties"]["key"]["enum"]
 
 
+def test_gemini_schema_converts():
+    from google.genai import types
+
+    sch = extractor.gemini_schema(extractor.SCHEMA)
+    types.Schema.model_validate(sch)  # what response_schema accepts
+    vals = sch["properties"]["balance_sheet"]["properties"]["rows"]["items"]["properties"]["values"]
+    assert vals == {"type": "array", "items": {"type": "number", "nullable": True}}
+    assert "additionalProperties" not in json.dumps(sch)
+
+
 def test_workbook_and_merge():
     meta = {"company_name": "ACME HOLDINGS LIMITED", "stock_code": "ACME", "currency": "SGD", "filing": "1H2026"}
     norm = extractor.normalise(FAKE)
