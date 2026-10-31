@@ -1,9 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
-    "api/index.py": { "maxDuration": 300 }
+    "api/index.py": { "maxDuration": 300, "excludeFiles": "node_modules/**" },
+    "api/browse.mjs": { "maxDuration": 120, "includeFiles": "node_modules/@sparticuz/chromium/bin/**" }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index" }
+    { "source": "/api/((?!browse).*)", "destination": "/api/index" }
   ]
 }

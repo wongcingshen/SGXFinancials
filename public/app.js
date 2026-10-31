@@ -73,7 +73,7 @@ async function api(path, opts = {}) {
   catch { throw new Error("Can’t reach the server. Check your connection and try again."); }
   const body = await r.json().catch(() => ({ error: r.status === 504 ? "The server took too long (Vercel time limit). Try again; downloads are cached." : `HTTP ${r.status}` }));
   if (r.status === 401) throw Object.assign(new Error("Wrong or missing app password. Add it in Settings."), { auth: true });
-  if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(body.error || `HTTP ${r.status}`), { body, status: r.status });
   return body;
 }
 
@@ -144,7 +144,8 @@ function renderIntro() {
 
 function renderSkeleton() {
   const bone = (w, h, extra = "") => `<div class="bone" style="width:${w};height:${h}px;${extra}"></div>`;
-  $("#results").innerHTML = `<div class="grid" aria-busy="true" aria-label="Loading announcements">${
+  $("#results").innerHTML = `<p class="muted" style="margin:0 0 14px;font-size:14px">Opening sgx.com in a browser and reading the results. This takes 10–40 seconds.</p>
+    <div class="grid" aria-busy="true" aria-label="Loading announcements">${
     Array.from({ length: 6 }, () => `<div class="skeleton">${bone("100%", 104, "border-radius:0")}
       <div style="padding:14px 16px 16px;display:flex;flex-direction:column;gap:8px">${bone("70%", 20)}${bone("95%", 12)}${bone("60%", 12)}
       <div style="display:flex;gap:8px;margin-top:10px">${bone("50%", 42, "border-radius:999px")}${bone("50%", 42, "border-radius:999px")}</div></div></div>`).join("")
@@ -176,8 +177,11 @@ function cardHtml(a, i) {
 function renderCards() {
   const list = state.announcements;
   if (!list.length) {
+    const d = state.debug || {};
+    const saw = d.source ? `<p style="font-size:12.5px">What the browser saw: “${esc(d.title || "untitled page")}”, ${d.api_seen ? "the page's result data loaded" : `no result data${d.api_status ? ` (SGX answered ${d.api_status})` : ""}`}, ${d.dom_links ?? 0} announcement links.${
+      d.body_excerpt ? `<br><span class="mono">${esc(d.body_excerpt.slice(0, 240))}</span>` : ""}</p>` : "";
     $("#results").innerHTML = `<div class="intro"><div><h3 style="margin-top:0">No financial results on this screen</h3>
-      <p>SGX lists nothing under ANNC17 for these dates${$("#company").value.trim() ? " and this company" : ""}. Try a wider range, or open the screening link to check on sgx.com.</p></div>
+      <p>SGX lists nothing under ANNC17 for these dates${$("#company").value.trim() ? " and this company" : ""}. Try a wider range, or open the screening link to check on sgx.com.</p>${saw}</div>
       <div><button type="button" class="btn btn-ember btn-lg" data-direct>${icon("file")}Process a filing directly</button></div></div>`;
     return;
   }
@@ -199,15 +203,22 @@ async function screen(ev) {
   renderSkeleton();
   try {
     const q = new URLSearchParams({ url: pageUrl(), company: $("#company").value.trim() });
-    const res = await api(`/api/screen?op=screen&${q}`);
+    // A browser reads the SGX page like a person would; with SGX_AUTH_TOKEN set, try the direct API first.
+    const routes = state.health?.sgx_token ? ["/api/screen?op=screen", "/api/browse?op=screen"] : ["/api/browse?op=screen"];
+    let res, err;
+    for (const route of routes) {
+      try { res = await api(`${route}&${q}`); break; } catch (e) { err = e; if (e.auth) break; }
+    }
+    if (!res) throw err;
     state.announcements = res.announcements;
+    state.debug = res.debug || null;
     const m = res.page_url.match(/from=(\d{8}).*?to=(\d{8})/);
     const fmt = (s) => nice(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6)}`);
     $("#annNote").textContent = `${res.count} result${res.count === 1 ? "" : "s"} · ANNC17 · ${m ? (m[1] === m[2] ? fmt(m[1]) : `${fmt(m[1])} – ${fmt(m[2])}`) : ""}`;
     renderCards();
   } catch (e) {
     $("#results").innerHTML = `<div class="notice error">${icon("alert")}<div><b>Couldn’t screen SGX.</b> ${esc(e.message)}
-      ${e.auth ? "" : `<br><span style="font-size:13px">If SGX started refusing requests, set <span class="mono">SGX_AUTH_TOKEN</span> on the server (see README).</span>`}</div></div>`;
+      ${e.auth ? "" : `<br><span style="font-size:13px">Open the screening link above to check sgx.com loads, then try again. You can also process a filing directly from its SGX link.</span>`}</div></div>`;
     if (e.auth) openSheet("#settingsSheet");
   } finally {
     btn.disabled = false;
@@ -290,6 +301,7 @@ function rerunHtml(job) {
 function formData(job, dryRun, pages) {
   const fd = new FormData();
   for (const k of ["announcement_url", "pdf_url", "issuer", "stock_code", "title"]) if (job[k]) fd.append(k, job[k]);
+  for (const u of job.pdf_urls || []) fd.append("pdf_url", u);
   if (job.file) fd.append("pdf", job.file);
   fd.append("dry_run", dryRun ? "true" : "false");
   fd.append("effort", state.effort);
@@ -314,6 +326,14 @@ async function run(job, mode) {
   try {
     scanRes = await api("/api/process?op=process", { method: "POST", body: formData(job, true, job.pages) });
   } catch (e) {
+    if (e.body?.need_browser && job.announcement_url && !job.pdf_urls) {
+      // Open the Title link in a browser and take the PDFs under "Attachments".
+      stage.innerHTML = `<p class="muted" style="margin:0">Opening the announcement in a browser to find its attachments…</p>`;
+      try {
+        const { files } = await api(`/api/browse?op=attachments&url=${encodeURIComponent(job.announcement_url)}`);
+        if (files.length) return run({ ...job, pdf_urls: files.map((f) => f.url) }, mode);
+      } catch (e2) { e = e2; }
+    }
     setSteps(1, { failed: true, scanOnly });
     stage.innerHTML = `<div class="notice error">${icon("alert")}<div>${esc(e.message)}</div></div>`;
     return;

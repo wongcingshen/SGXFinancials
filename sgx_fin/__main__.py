@@ -100,7 +100,13 @@ def main(argv: list[str] | None = None) -> int:
     screen = _screen_from_args(a)
     print(f"Screening {screen.page_url}")
     client = SGXClient()
-    anns = client.screen(screen, company=a.company)
+    try:
+        anns = client.screen(screen, company=a.company)
+    except RuntimeError as e:
+        print(f"ERROR: {e}")
+        return 1
+    if client.last_debug and not anns:
+        print(f"  (browser: {client.last_debug})")
     targets = _watchlist(getattr(a, "watchlist", None))
     if targets:
         t = [x.lower() for x in targets]

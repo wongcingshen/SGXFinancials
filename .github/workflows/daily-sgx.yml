@@ -33,12 +33,17 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
 
       - name: Screen and extract
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SGX_AUTH_TOKEN: ${{ secrets.SGX_AUTH_TOKEN }}
+          CHROME_PATH: /usr/bin/google-chrome  # preinstalled on GitHub's Ubuntu runners
           URL: ${{ inputs.url }}
           COMPANY: ${{ inputs.company }}
           DRY_RUN: ${{ inputs.dry_run }}

@@ -15,11 +15,14 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
 
 ## How it works
 
-1. **Screen**: uses the SGX announcements page URL format, e.g.
+1. **Screen** (`scraper/sgx.mjs`): a headless browser opens the SGX announcements page URL, e.g.
    `https://www.sgx.com/stock-exchange/company-announcements?from=20261030&to=20261030&ANNC=ANNC17`
-   (`from`/`to` = Singapore dates, `ANNC17` = Financial Statements). The page URL is translated
-   into the same `api.sgx.com` query the SGX site makes.
-2. **Download**: opens each announcement on `links.sgx.com` and downloads its PDF attachments.
+   (`from`/`to` = Singapore dates, `ANNC17` = Financial Statements), exactly as a person would,
+   and reads the result list: the data the page loads for itself (paged through with the page's
+   own token), or else the links in the result table. SGX's `api.sgx.com` refuses direct requests
+   without that page-generated token, which is why a browser is used.
+2. **Open each Title link** and take the PDFs under **Attachments** (fetched directly from
+   `links.sgx.com`, or through the browser if that is refused), then download them.
 3. **Non-AI page scan** (`sgx_fin/page_scanner.py`): scores every page against keyword sets
    (statement titles such as *"statement of financial position"*, line items such as *"total
    assets"*, *"net cash from operating activities"*, plus numeric density) and penalises notes,
@@ -68,15 +71,17 @@ python tests/dev_server.py --mock      # demo data; drop --mock for the real thi
    |---|---|---|
    | `GEMINI_API_KEY` | yes (or `ANTHROPIC_API_KEY`) | Gemini API key for extraction |
    | `APP_PASSWORD` | strongly recommended | Anyone with the URL could otherwise spend your API credits |
-   | `SGX_AUTH_TOKEN` | only if needed | See *SGX token* below |
+   | `SGX_AUTH_TOKEN` | no | Optional shortcut, see *SGX token* below |
    | `GEMINI_MODEL` | no | Pin a model. Default is Flash-Lite (largest free daily allowance): latest `gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`, then `gemini-flash-lite-latest` if one is unavailable or out of quota. Each filing uses one request. Try `gemini-3.1-pro-preview` for hard filings |
    | `ANTHROPIC_API_KEY` / `CLAUDE_MODEL` | no | Use Claude (`claude-opus-5-5`) instead; with both keys set, `AI_PROVIDER=gemini\|anthropic` picks |
 
 3. Deploy. Open the site, enter the password, pick a date and click **Screen**, then
    **Scan** (free, keyword scan only) or **Extract** (AI) on any announcement.
 
-Vercel notes: `vercel.json` sets `maxDuration: 300` s for the API (extraction usually takes
-1–3 min). Request bodies are capped at 4.5 MB by Vercel, so large PDFs should be given by SGX link
+Vercel notes: two functions are deployed. `api/browse.mjs` (Node) runs Chromium from
+`@sparticuz/chromium` for screening and attachments (`maxDuration: 120` s; a screen takes 10–40 s).
+`api/index.py` (Python) downloads, scans and extracts (`maxDuration: 300` s; extraction usually
+takes 1–3 min). Request bodies are capped at 4.5 MB by Vercel, so large PDFs should be given by SGX link
 rather than uploaded. Vercel has no storage, so each run returns a workbook to download; upload
 your previous workbook in **Options** to merge new periods into it.
 
@@ -97,7 +102,9 @@ With an empty watchlist it only logs the day's announcements, so it never spends
 
 ```bash
 pip install -r requirements.txt
+npm install                      # the headless browser used to read sgx.com
 export GEMINI_API_KEY=...
+export CHROME_PATH=/path/to/chrome   # only off Linux x64 (macOS/Windows): use your installed Chrome
 
 # list financial-results announcements for a screen
 python -m sgx_fin screen "https://www.sgx.com/stock-exchange/company-announcements?from=20261030&to=20261030&ANNC=ANNC17"
@@ -116,13 +123,10 @@ Workbooks go to `output/`. Extractions are cached per PDF excerpt, so re-runs ar
 
 ## SGX token
 
-`api.sgx.com` is the backend of the public SGX website. If it starts answering 401/403, it wants
-the `authorizationtoken` header the website sends. Either:
-
-- copy it from your browser (open the SGX announcements page → DevTools → Network → the request
-  to `api.sgx.com/announcements` → Request Headers → `authorizationtoken`) into `SGX_AUTH_TOKEN`, or
-- for the CLI/GitHub Action, `pip install playwright && playwright install chromium`; the tool
-  then opens the page URL headlessly and captures the token automatically.
+Not needed: the browser step reads the SGX page itself. As an optional shortcut you can copy the
+`authorizationtoken` the page sends (SGX announcements page → DevTools → Network → the request to
+`api.sgx.com/announcements` → Request Headers) into `SGX_AUTH_TOKEN`; screening then queries the
+API directly first and falls back to the browser when the token expires.
 
 SGX's terms of use apply to the data you retrieve; keep request volumes modest.
 
@@ -138,6 +142,7 @@ SGX's terms of use apply to the data you retrieve; keep request volumes modest.
 
 ```bash
 python tests/test_offline.py               # scanner, URL mapping, schema, Excel merge
+CHROME_PATH=/path/to/chrome node tests/browse_test.mjs   # browser scraper vs a stand-in SGX site
 NODE_PATH=$(npm root -g) node tests/make_sample_pdf.js   # regenerate the sample PDF (needs playwright)
 ```
 

@@ -2,8 +2,9 @@
 
 Routes (the operation is also accepted as ?op=health|screen|process on any path)
   GET  /api/health                    configuration status
-  GET  /api/screen?url=...&company=   list announcements for an SGX page URL
+  GET  /api/screen?url=...&company=   list announcements for an SGX page URL (token or browser)
   POST /api/process                   scan (+ extract) one filing, return workbook
+On Vercel, /api/browse (api/browse.mjs) runs the headless browser for screening and attachments.
 
 Environment variables (Vercel > Project > Settings > Environment Variables)
   GEMINI_API_KEY      AI key for extraction (or ANTHROPIC_API_KEY to use Claude)
@@ -104,6 +105,16 @@ def screen():
          "url": a.url, "broadcast": a.broadcast, "category": a.category} for a in anns])
 
 
+@api("attachments", "GET")
+def attachment_links():
+    # On Vercel /api/browse is the Node browser function; this covers local runs of this app.
+    url = request.args.get("url", "")
+    if not is_sgx_url(url):
+        return jsonify(error="Provide an https://*.sgx.com announcement link"), 400
+    ann = Announcement("", "", "", url, "", "", {})
+    return jsonify(url=url, files=[{"name": Path(u).name, "url": u} for u in SGXClient().attachments(ann)])
+
+
 @api("process", "POST")
 def process():
     f = request.form
@@ -123,15 +134,26 @@ def process():
         pdfs = [path]
         meta["filing"] = meta["filing"] or up.filename
     else:
-        url = f.get("announcement_url") or f.get("pdf_url") or ""
-        if not is_sgx_url(url):
+        pdf_urls = [u for u in f.getlist("pdf_url") if u]
+        url = f.get("announcement_url") or (pdf_urls[0] if pdf_urls else "")
+        if not url or not all(is_sgx_url(u) for u in [url, *pdf_urls]):
             return jsonify(error="Provide a PDF upload or an https://*.sgx.com link"), 400
         meta["announcement_url"] = url
         ann = Announcement(meta["filing"], meta["company_name"], meta["stock_code"], url, "", "", {})
         folder = WORK / ann.slug
-        pdfs = [p for u in client.attachments(ann) if (p := client.download(u, folder))]
+        # PDF links found by the browser step, else read the announcement page's Attachments.
+        try:
+            links = pdf_urls or client.attachments(ann)
+        except Exception as e:
+            return jsonify(error=f"Could not open the announcement page: {e}", need_browser=True), 502
+        if not links:
+            return jsonify(error="No attachments found on the announcement page", need_browser=True), 404
+        try:
+            pdfs = [p for u in links if (p := client.download(u, folder))]
+        except Exception as e:
+            return jsonify(error=f"Could not download the attachment: {e}"), 502
     if not pdfs:
-        return jsonify(error="No PDF attachment found"), 404
+        return jsonify(error="The attachments are not PDFs"), 404
 
     # 2. Non-AI scan picks the attachment and the statement pages.
     picked = pick_best_pdf(pdfs)

@@ -6,19 +6,24 @@ Screening is driven by the public SGX page URL, e.g.
 
 `from` / `to` are Singapore dates (YYYYMMDD) and `ANNC=ANNC17` is the
 "Financial Statements" category. That page is a JavaScript app whose listing
-comes from api.sgx.com; this module translates the page URL into the same
-API query. If the API asks for an `authorizationtoken`, it is taken from
-SGX_AUTH_TOKEN, or captured automatically by opening the page URL in a
-headless browser (optional `playwright` dependency).
+comes from api.sgx.com, which refuses requests without the token the page
+generates. So by default the page is opened in a headless browser
+(scraper/cli.mjs, Node + puppeteer) and its results are read from there; with
+SGX_AUTH_TOKEN set, the API is queried directly instead. Announcement pages
+and attachments on links.sgx.com are fetched directly, with the browser as a
+fallback.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
@@ -27,6 +32,8 @@ import requests
 PAGE_URL = "https://www.sgx.com/stock-exchange/company-announcements"
 API_URL = "https://api.sgx.com/announcements/v1.1/"
 FINANCIAL_RESULTS_CATEGORY = "ANNC17"
+ROOT = Path(__file__).resolve().parent.parent
+SGT = timezone(timedelta(hours=8))
 PAGE_SIZE = 250
 
 HEADERS = {
@@ -122,7 +129,7 @@ def _parse_announcement(item: dict) -> Announcement:
                 break
     broadcast = _first(item, "broadcast_date_time", "submission_date_time", "submission_date")
     if broadcast.isdigit() and len(broadcast) >= 12:  # epoch milliseconds
-        broadcast = datetime.fromtimestamp(int(broadcast) / 1000).strftime("%Y-%m-%d %H:%M")
+        broadcast = datetime.fromtimestamp(int(broadcast) / 1000, SGT).strftime("%Y-%m-%d %H:%M")
     return Announcement(
         title=_first(item, "title", "announcement_title"),
         issuer=_first(item, "issuer_name", "security_name", "company_name"),
@@ -140,17 +147,22 @@ class SGXClient:
         self.session.headers.update(HEADERS)
         self.timeout = timeout
         self.token = token or os.environ.get("SGX_AUTH_TOKEN")
+        self.last_debug: dict = {}
 
     # ---------------------------------------------------------------- screen
     def screen(self, screen: Screen, company: str | None = None) -> list[Announcement]:
         """All announcements matching the page URL, optionally filtered by company name/code."""
-        try:
-            items = self._fetch_all(screen)
-        except PermissionError:
-            if not self.token:
-                self.token = capture_token(screen.page_url)
-            items = self._fetch_all(screen)
-        anns = [_parse_announcement(i) for i in items]
+        anns = None
+        if self.token:
+            try:
+                anns = [_parse_announcement(i) for i in self._fetch_all(screen)]
+            except PermissionError:
+                anns = None  # token expired: fall back to the browser
+        if anns is None:
+            out = run_browser("screen", screen.page_url)
+            self.last_debug = out.get("debug", {})
+            anns = [Announcement(a["title"], a["issuer"], a["stock_code"], a["url"], a["broadcast"],
+                                 a["category"], a) for a in out["announcements"]]
         if company:
             c = company.lower()
             anns = [a for a in anns if c in a.issuer.lower() or c == a.stock_code.lower()]
@@ -177,15 +189,19 @@ class SGXClient:
         """PDF attachment URLs listed on the announcement's links.sgx.com page."""
         if ann.url.lower().endswith(".pdf"):
             return [ann.url]
-        r = self.session.get(ann.url, timeout=self.timeout)
-        r.raise_for_status()
-        hrefs = re.findall(r'href=["\']([^"\']+)["\']', r.text, flags=re.I)
-        urls = []
-        for h in hrefs:
-            if "fileopen" in h.lower() or h.lower().split("?")[0].endswith(".pdf"):
-                full = urljoin(r.url, h.replace("&amp;", "&"))
-                if is_sgx_url(full) and full not in urls:
-                    urls.append(full)
+        urls: list[str] = []
+        try:
+            r = self.session.get(ann.url, timeout=self.timeout)
+            r.raise_for_status()
+            for h in re.findall(r'href=["\']([^"\']+)["\']', r.text, flags=re.I):
+                if "fileopen" in h.lower() or h.lower().split("?")[0].endswith(".pdf"):
+                    full = urljoin(r.url, h.replace("&amp;", "&"))
+                    if is_sgx_url(full) and full not in urls:
+                        urls.append(full)
+        except requests.RequestException:
+            pass
+        if not urls and browser_available():
+            urls = [f["url"] for f in run_browser("attachments", ann.url)["files"]]
         return urls
 
     def download(self, url: str, dest_dir: Path) -> Path | None:
@@ -211,39 +227,23 @@ def _filename(resp: requests.Response, url: str) -> str:
     return name if name.lower().endswith(".pdf") else name + ".pdf"
 
 
-def capture_token(page_url: str, wait_ms: int = 20000) -> str:
-    """Open the SGX page in headless Chromium and capture the API token it sends."""
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError as e:
+def browser_available() -> bool:
+    return bool(shutil.which("node")) and (ROOT / "node_modules" / "puppeteer-core").exists()
+
+
+def run_browser(op: str, url: str) -> dict:
+    """Run scraper/cli.mjs (headless browser) and return its JSON output."""
+    if not browser_available():
         raise RuntimeError(
-            "SGX API needs an authorizationtoken. Either set SGX_AUTH_TOKEN (copy it from your "
-            "browser: DevTools > Network > request to api.sgx.com/announcements > Request Headers), "
-            "or `pip install playwright && playwright install chromium` so it can be captured "
-            "automatically."
-        ) from e
-
-    token: dict[str, str] = {}
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page(user_agent=HEADERS["User-Agent"])
-
-        def on_request(req):
-            if "api.sgx.com/announcements" in req.url:
-                t = req.headers.get("authorizationtoken")
-                if t:
-                    token["value"] = t
-
-        page.on("request", on_request)
-        page.goto(page_url, wait_until="domcontentloaded")
-        waited = 0
-        while "value" not in token and waited < wait_ms:
-            page.wait_for_timeout(500)
-            waited += 500
-        browser.close()
-    if "value" not in token:
-        raise RuntimeError(f"Could not capture an SGX API token from {page_url}")
-    return token["value"]
+            "SGX's announcement list only loads in a browser. Install Node.js and run `npm install` "
+            "in the project (set CHROME_PATH to a local Chrome when not on Linux x64), or set "
+            "SGX_AUTH_TOKEN to query the SGX API directly."
+        )
+    out = subprocess.run([shutil.which("node"), str(ROOT / "scraper" / "cli.mjs"), op, url],
+                         capture_output=True, text=True, timeout=300, cwd=ROOT)
+    if out.returncode != 0:
+        raise RuntimeError(f"Browser step failed: {out.stderr.strip()[-600:]}")
+    return json.loads(out.stdout)
 
 
 def is_sgx_url(url: str) -> bool:
@@ -256,4 +256,4 @@ def build_page_url(date_from: date, date_to: date, category: str = FINANCIAL_RES
     return Screen(date_from, date_to, {"ANNC": [category]}).page_url
 
 
-__all__ = ["Screen", "Announcement", "SGXClient", "build_page_url", "capture_token", "is_sgx_url"]
+__all__ = ["Screen", "Announcement", "SGXClient", "build_page_url", "browser_available", "is_sgx_url", "run_browser"]
