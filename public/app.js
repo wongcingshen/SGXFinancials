@@ -371,6 +371,8 @@ function formData(a, dryRun, pages, workbook, files) {
   if (a.url && !a.file) fd.append("announcement_url", a.url);
   for (const [k, v] of [["issuer", a.issuer], ["stock_code", a.stock_code], ["title", a.title]]) if (v) fd.append(k, v);
   for (const f of files || a.attachments || []) { fd.append("pdf_url", f.url); fd.append("pdf_name", f.name || ""); }
+  const formats = customFormats();
+  if (formats.length) fd.append("formats", JSON.stringify(formats.map(({ marked, ...f }) => f)));
   if (a.file) fd.append("pdf", a.file);
   fd.append("dry_run", dryRun ? "true" : "false");
   fd.append("effort", state.effort);
@@ -659,12 +661,130 @@ function clearMerge() {
 }
 $("#wbClear").addEventListener("click", clearMerge);
 
+// ------------------------------------------------------------------ statement formats
+// Built-in formats come from the server (formats/*.json). Formats imported from ShareInvestor or
+// edited here are kept in this browser and sent with every extraction; one with a built-in's id
+// replaces it.
+const FORMAT_USES = {
+  general: "All companies except banks: trading, manufacturing, property, services, holding companies.",
+  bank: "Banks: statements show interest earned/expended (interest income/expense), deposits and loans/advances.",
+  reit: "REITs and business trusts: gross revenue, property expenses, net property income, distributions.",
+  insurance: "Insurers: gross written premiums, claims, underwriting result, investment income.",
+};
+const FORMAT_NAMES = { general: "General", bank: "Bank", reit: "REIT", insurance: "Insurance" };
+state.builtinFormats = [];
+let editingFormat = null;
+
+function customFormats() {
+  try { return JSON.parse(store.get("sgxf-formats", "[]")) || []; } catch { return []; }
+}
+function saveCustomFormats(list) {
+  store.set("sgxf-formats", JSON.stringify(list));
+  renderFormats();
+}
+async function loadFormats() {
+  try { state.builtinFormats = (await (await fetch("/api/formats?op=formats")).json()).formats || []; } catch { /* offline */ }
+  renderFormats();
+}
+function renderFormats() {
+  const custom = customFormats();
+  const builtinIds = new Set(state.builtinFormats.map((f) => f.id));
+  const items = [
+    ...state.builtinFormats.map((b) => {
+      const mine = custom.find((c) => c.id === b.id);
+      return mine ? { ...mine, tag: "your version" } : { ...b, tag: "built-in" };
+    }),
+    ...custom.filter((c) => !builtinIds.has(c.id)).map((c) => ({ ...c, tag: "yours" })),
+  ];
+  $("#fmtList").innerHTML = items.map((f) => `<div class="fmt-item"><span class="t"><b>${esc(f.name)}</b>
+      <span class="tag ${f.tag === "built-in" ? "na" : "pass"}">${f.tag}</span><small>${esc(f.applies_to)}</small></span>
+      <button type="button" class="btn btn-outline" data-fmt="${esc(f.id)}" style="min-height:36px;padding:0 12px">Edit</button></div>`).join("")
+    || `<p class="muted" style="margin:0;font-size:13px">Formats load when the server is reachable.</p>`;
+}
+function fmtUseChanged() {
+  const use = $("#fmtUse").value;
+  $("#fmtDescRow").hidden = use !== "other";
+  if (use !== "other" && !$("#fmtName").value.trim()) $("#fmtName").value = FORMAT_NAMES[use];
+}
+function openFormat(id) {
+  const mine = customFormats().find((f) => f.id === id);
+  const f = mine || state.builtinFormats.find((x) => x.id === id);
+  editingFormat = f?.id || null;
+  const use = f ? (FORMAT_USES[f.id] ? f.id : "other") : "reit";
+  $("#fmtUse").value = use;
+  $("#fmtName").value = f?.name || FORMAT_NAMES[use] || "";
+  $("#fmtDesc").value = use === "other" ? f?.applies_to || "" : "";
+  $("#fmtDescRow").hidden = use !== "other";
+  $("#fmtText").value = f?.marked || "[Income Statement]\n\n[Balance Sheet]\n\n[Cash Flow]\n";
+  $("#fmtFileName").textContent = "Choose or drop an Excel / CSV export";
+  $("#fmtProblems").hidden = true;
+  $("#fmtDelete").hidden = !mine;
+  $("#fmtTitle").textContent = f ? `${f.name} format` : "New format";
+  openSheet("#formatSheet");
+}
+function formatFields() {
+  const use = $("#fmtUse").value;
+  const fd = new FormData();
+  fd.append("id", use === "other" ? $("#fmtName").value.trim() || "custom" : use);
+  fd.append("name", $("#fmtName").value.trim() || FORMAT_NAMES[use] || "Custom");
+  fd.append("applies_to", use === "other" ? $("#fmtDesc").value.trim() : FORMAT_USES[use]);
+  fd.append("base", use === "other" ? "general" : use);
+  return fd;
+}
+function showProblems(problems) {
+  $("#fmtProblems").hidden = !problems?.length;
+  $("#fmtProblems").innerHTML = problems?.length ? `${icon("alert")}<div>${problems.map(esc).join("<br>")}</div>` : "";
+}
+async function readFormat(source) {
+  const fd = formatFields();
+  if (source instanceof File) fd.append("file", source);
+  else fd.append("text", source);
+  const res = await api("/api/parse_format?op=parse_format", { method: "POST", body: fd, timeoutMs: 60_000 });
+  showProblems(res.problems);
+  return res;
+}
+async function guarded(fn) {
+  try { await fn(); } catch (e) { showProblems([e.message]); }
+}
+
 // ------------------------------------------------------------------ wiring
 [$("#from").value, $("#to").value] = defaultRange();
 $("#screenForm").addEventListener("submit", screen);
 $("#openDirect").addEventListener("click", () => openSheet("#directSheet"));
 $("#openSettings").addEventListener("click", () => openSheet("#settingsSheet"));
 $("#folderBtn").addEventListener("click", chooseFolder);
+$("#fmtList").addEventListener("click", (e) => { const b = e.target.closest("[data-fmt]"); if (b) openFormat(b.dataset.fmt); });
+$("#fmtAdd").addEventListener("click", () => openFormat(null));
+$("#fmtUse").addEventListener("change", fmtUseChanged);
+wireDrop("#fmtDrop", "#fmtFile", (file) => file && guarded(async () => {
+  $("#fmtFileName").textContent = file.name;
+  $("#fmtText").value = (await readFormat(file)).marked;
+}));
+$("#fmtRead").addEventListener("click", () => guarded(async () => {
+  $("#fmtText").value = (await readFormat($("#fmtText").value)).marked;
+}));
+$("#fmtSave").addEventListener("click", () => guarded(async () => {
+  const res = await readFormat($("#fmtText").value);
+  const list = customFormats().filter((f) => f.id !== res.format.id && f.id !== editingFormat);
+  saveCustomFormats([...list, { ...res.format, marked: res.marked }]);
+  editingFormat = res.format.id;
+  $("#fmtText").value = res.marked;
+  $("#fmtDelete").hidden = false;
+  toast(res.problems.length ? "Saved — check the formula notes" : `“${res.format.name}” format saved`);
+  if (!res.problems.length) $("#formatSheet").close();
+}));
+$("#fmtExport").addEventListener("click", () => guarded(async () => {
+  const res = await readFormat($("#fmtText").value);
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(res.format, null, 1)], { type: "application/json" }));
+  link.download = `${res.format.id}.json`;
+  link.click();
+}));
+$("#fmtDelete").addEventListener("click", () => {
+  saveCustomFormats(customFormats().filter((f) => f.id !== editingFormat));
+  toast("Your changes were removed");
+  $("#formatSheet").close();
+});
 $("#bulk").addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (b?.id === "bulkRun") await folderReady();
@@ -695,6 +815,7 @@ if (iso(deep.get("from"))) {
 syncEffort();
 renderIntro();
 loadHealth();
+loadFormats();
 if (canPickFolder) idb("readonly", (st) => st.get("dir")).then((d) => { state.dir = d || null; renderFolder(); });
 renderFolder();
 if (iso(deep.get("from"))) screen();

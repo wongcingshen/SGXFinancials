@@ -197,7 +197,7 @@ LOCATE = ("Each image is one page of a company's results filing, numbered as lab
 
 # ------------------------------------------------------------------ extraction
 def extract(pdf: Path, pages: list[int], system: str, instruction: str,
-            deadline: float | None = None) -> tuple[dict, str, dict]:
+            deadline: float | None = None, formats: dict | None = None) -> tuple[dict, str, dict]:
     """Read the statements from picture pages. Returns (data, model used, usage).
 
     `pages` are original page numbers; data[...]["page_numbers"] come back as 1-based positions in
@@ -206,7 +206,7 @@ def extract(pdf: Path, pages: list[int], system: str, instruction: str,
     errors = []
     for model in models():
         try:
-            data, usage = _extract_with(model, pdf, pages, system, instruction, deadline)
+            data, usage = _extract_with(model, pdf, pages, system, instruction, deadline, formats)
             return data, model, usage
         except GLMError as e:
             errors.append(f"{model}: {e}")
@@ -218,7 +218,7 @@ def extract(pdf: Path, pages: list[int], system: str, instruction: str,
 
 
 def _extract_with(model: str, pdf: Path, pages: list[int], system: str, instruction: str,
-                  deadline: float | None = None) -> tuple[dict, dict]:
+                  deadline: float | None = None, formats: dict | None = None) -> tuple[dict, dict]:
     limit = max_images()
     use = pages
     usage_total: dict = {}
@@ -238,7 +238,7 @@ def _extract_with(model: str, pdf: Path, pages: list[int], system: str, instruct
         use = sorted(found)[:limit] or pages[:limit]
     raw, usage = _call(model, system + "\n\n" + SKELETON, _pages_content(render(pdf, use, 1600), instruction), deadline)
     _add(usage_total, usage)
-    data = coerce(raw)
+    data = coerce(raw, formats)
     for st in STATEMENTS:  # positions in `use` -> positions in `pages`
         data[st]["page_numbers"] = [pages.index(use[n - 1]) + 1 for n in data[st]["page_numbers"] if 1 <= n <= len(use)]
     return data, usage_total
@@ -273,12 +273,13 @@ def number(v):
     return -abs(x) if neg else x
 
 
-def coerce(raw: dict) -> dict:
+def coerce(raw: dict, formats: dict | None = None) -> dict:
     """Shape GLM's answer like the schema-checked answers of the other providers."""
+    formats = formats or T.BUILTIN
     unit = str(raw.get("unit") or "").lower()
     out = {
         "company_name": str(raw.get("company_name") or ""),
-        "format": raw.get("format") if raw.get("format") in T.FORMATS else "general",
+        "format": raw.get("format") if raw.get("format") in formats else "general",
         "currency": str(raw.get("currency") or ""),
         "unit": unit if unit in UNITS else "thousands",
         "basis": str(raw.get("basis") or "Group"),
@@ -288,7 +289,7 @@ def coerce(raw: dict) -> dict:
         out["notes"] = (out["notes"] + " Unit not stated; figures taken as thousands.").strip()
     for st in STATEMENTS:
         block = raw.get(st) if isinstance(raw.get(st), dict) else {}
-        keys = {r.key for r in T.data_rows(st)}
+        keys = {r.key for r in T.data_rows(st, formats=formats)}
         periods = []
         for i, p in enumerate(block.get("periods") or [], 1):
             if isinstance(p, dict):

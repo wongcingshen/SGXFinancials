@@ -333,6 +333,46 @@ def test_bank_in_crores_with_explicit_columns():
     assert extractor.normalise(no_unit)["income_statement"]["values"]["revenue"][0] == 120512
 
 
+def test_statement_formats_import_edit_and_formulas():
+    from sgx_fin import formats as F, template as T
+
+    # A workbook made by the app, imported back, reproduces its format exactly (labels, kinds, keys).
+    for fid in ("general", "bank"):
+        data, _ = workbook_bytes(None, extractor.normalise({**FAKE, "format": fid}), {"company_name": "A", "format": fid})
+        back = F.parse(T.BUILTIN[fid]["name"], "", filename="a.xlsx", data=data)
+        want = T.to_json(T.BUILTIN[fid])
+        for st in T.STATEMENT_IDS:
+            assert [(r["label"], r["kind"], r.get("key")) for r in back["statements"][st]["rows"]] == \
+                   [(r["label"], r["kind"], r.get("key")) for r in want["statements"][st]["rows"]], (fid, st)
+
+    # Rows pasted from a statements page: labels mapped by meaning, figures ignored.
+    pasted = F.parse("General", "", text="Income Statement\nRevenue\t1,000\nCost of Sales\t(600)\n"
+                                         "Gross Profit\t400\nTaxation\t(50)\nPATMI\t300\n")
+    keys = [r["key"] for r in pasted["statements"]["income_statement"]["rows"]]
+    assert keys == ["revenue", "cost_of_sales", "gross_profit", "tax", "pat_shareholders"]
+
+    # Editable text with a formula entry; the text form reads back unchanged.
+    text = ("[Income Statement]\nRevenue\nCost of Goods Sold\n= Gross Profit := Revenue + Cost of Goods Sold\n"
+            "Depreciation & Amortisation\nProfit Before Tax\n= EBITDA := Profit Before Tax + Depreciation & Amortisation\n"
+            "Bad := Revnue - 1\n")
+    fmt = F.parse("General", "everyone", text=text, fmt_id="general")
+    assert F.parse("General", "everyone", text=F.to_marked(fmt), fmt_id="general") == fmt
+    formats = T.resolve([fmt])
+    assert any("Revnue" in p for p in T.formula_problems(formats["general"]))
+    d = json.loads(json.dumps(FAKE))
+    d["income_statement"]["rows"] = [r for r in d["income_statement"]["rows"] if r["key"] != "gross_profit"] + [
+        {"key": "depreciation_amortisation", "source_label": "D&A", "values": [6000, 5650]}]
+    inc = extractor.normalise(d, formats)["income_statement"]
+    assert inc["values"]["gross_profit"] == [40100, 35500] and inc["labels"]["gross_profit"].startswith("formula")
+    assert inc["values"]["ebitda"] == [25400, 21750]
+    assert "bad" not in inc["values"]  # an unresolved formula leaves the entry blank
+    printed = extractor.normalise(FAKE, formats)["income_statement"]
+    assert not printed["labels"]["gross_profit"].startswith("formula")  # a printed figure is kept
+    data, checks = workbook_bytes(None, extractor.normalise(d, formats), {"company_name": "A", "format": "general"}, formats)
+    labels_in_sheet = [c.value for c in load_workbook(io.BytesIO(data))["Income Statement"]["A"]]
+    assert "EBITDA" in labels_in_sheet and "Other Income" not in labels_in_sheet  # the edited format's rows
+
+
 def test_workbook_and_merge():
     meta = {"company_name": "ACME HOLDINGS LIMITED", "stock_code": "ACME", "currency": "SGD", "filing": "1H2026"}
     norm = extractor.normalise(FAKE)

@@ -1,8 +1,8 @@
-# SGX Financial Results → ShareInvestor-style Excel
+# SGX Financial Results → Excel
 
 Automatically retrieve financial results of SGX-listed companies and turn the three primary
-statements (income statement, balance sheet, cash flow) into an Excel workbook laid out like
-the ShareInvestor.com Financials pages.
+statements (income statement, balance sheet, cash flow) into an Excel workbook in a standard,
+editable layout ("statement format") per type of company.
 
 ```
 SGX page URL ──► announcements ──► PDF attachments ──► keyword page scan (no AI)
@@ -39,9 +39,28 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
 5. **AI extraction** (`sgx_fin/extractor.py`): only the selected pages are cut into a small PDF
    and sent to the AI with a strict JSON schema built from the template, so
    every number lands on a known line. Group (consolidated) figures only, with the company's own label kept for audit.
-6. **Excel** (`sgx_fin/excel_writer.py`): rescales to `'000`, writes ShareInvestor-style sheets,
+6. **Excel** (`sgx_fin/excel_writer.py`): rescales to `'000`, writes the sheets in the chosen format,
    runs tie-out checks (assets = liabilities + equity, op + inv + fin = net change in cash, …)
    and **merges** new periods into an existing workbook so quarters/half-years/full years accumulate.
+
+**Statement formats.** The rows, their order, subtotals and formulas come from a *format*, chosen
+per filing by the AI from each format's "used for" description. Built-in formats live in
+`formats/*.json` (General, Bank). In the web app (**Settings → Statement formats**) you can:
+
+- import a format from an Excel / CSV export or rows pasted from a financial data site's
+  statements page: labels, order, headings and totals are read and shown as editable text;
+- add, rename, reorder or delete entries, and change a built-in (your version replaces it);
+- add **formula entries**, e.g. `= EBITDA := Profit Before Tax + Finance Costs + Depreciation & Amortisation`
+  or `Gross Profit := Revenue + Cost of Goods Sold`: an entry with `:=` is calculated from other
+  entries of the same statement (+ and −, plain numbers allowed) wherever the filing doesn't
+  print it; a printed figure is kept. Misspelt references are reported when you save;
+- add a format for another type of company (REITs, insurers, …).
+
+Editable text syntax: `[Income Statement]` / `[Balance Sheet]` / `[Cash Flow]` start a statement,
+one entry per line, `# ` marks a heading, `= ` a bold total, `:= …` a formula. Formats are kept in
+the browser and sent with each extraction; **Download as JSON** and add the file to `formats/`
+to make it the default for everyone. Imported entries are matched by meaning ("Cost of Sales",
+"Taxation", "PATMI"…) to the built-in ones, so derived lines and tie-out checks keep working.
 
 **Banks** get their own layout: Interest Income, Interest Expense, Net Interest Income, Fee &
 Commission Income, Other Non-Interest Income, Operating Expenses, Operating Profit before
@@ -63,8 +82,8 @@ gross profit. The AI then extracts *Raw materials, consumables used and changes 
 **Cost of Goods Sold** = the sum of those three and **Gross Profit** = Revenue − Cost of Goods Sold.
 Both are marked "computed" in the Source Map, and the gross-profit check shows "derived".
 
-The row layout lives in **`sgx_fin/template.py`**. Edit labels, order or add rows there to match
-your ShareInvestor view exactly; nothing else needs changing.
+Formats are loaded by **`sgx_fin/template.py`**; importing and the editable text form are in
+**`sgx_fin/formats.py`**.
 
 ## Web app
 
@@ -166,7 +185,7 @@ SGX's terms of use apply to the data you retrieve; keep request volumes modest.
 
 | Sheet | Contents |
 |---|---|
-| Income Statement / Balance Sheet / Cash Flow | ShareInvestor-style rows, one column per period (latest first), `'000` of reporting currency, EPS in cents |
+| Income Statement / Balance Sheet / Cash Flow | The format's rows, one column per period (grouped by length, latest first), `'000` of reporting currency, EPS in cents |
 | Checks | Arithmetic tie-outs per period: PASS / FAIL / n/a |
 | Source Map | For every figure: the company's own line label, filing, PDF, pages and model |
 

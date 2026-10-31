@@ -303,6 +303,14 @@ dialog.sheet[open] { display: flex; flex-direction: column; animation: sheet-in 
   background: var(--color-field); font-size: 15px; outline: none; transition: border-color var(--motion-quick);
 }
 .input:focus { border-color: var(--color-ember-deep); background: var(--color-card); }
+.fmt-list { display: flex; flex-direction: column; gap: 6px; }
+.fmt-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 12px; background: var(--color-field); }
+.fmt-item .t { flex: 1; min-width: 0; font-size: 14px; }
+.fmt-item .t b { font-weight: 600; }
+.fmt-item .t small { display: block; color: var(--color-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fmt-item .tag { font-size: 11.5px; padding: 3px 8px; }
+textarea.input { min-height: 0; padding: 10px 12px; line-height: 1.5; resize: vertical; }
+select.input { appearance: auto; }
 .two { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
 .divider { display: flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--color-muted); }
 .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--color-line); }

@@ -198,10 +198,69 @@
         </div>
         <button type="button" class="link-btn" id="wbClear" hidden style="align-self:flex-start;color:var(--color-ember-deep)">Don’t merge</button>
       </div>
+      <div class="form-row">
+        <span class="lbl">Statement formats (ShareInvestor layout)</span>
+        <div class="fmt-list" id="fmtList"></div>
+        <button type="button" class="btn btn-outline" id="fmtAdd" style="align-self:flex-start"><svg class="i"><use href="#i-plus"/></svg>Add a format</button>
+        <p class="help">Each filing is written in the format that fits the company. Import yours from a ShareInvestor export to match it exactly, and add your own entries or formulas. Saved in this browser.</p>
+      </div>
       <div class="notice info" id="serverInfo"></div>
     </div>
   </div>
   <div class="sheet-foot"><button type="button" class="btn btn-ember btn-lg btn-block" data-close>Done</button></div>
+</dialog>
+
+<!-- Statement format editor -->
+<dialog class="sheet" id="formatSheet" aria-labelledby="fmtTitle">
+  <div class="sheet-head">
+    <div class="t"><h2 id="fmtTitle">Statement format</h2><div class="sub muted">The rows, order and formulas of the workbook for one type of company.</div></div>
+    <button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="sheet-body">
+    <div class="form">
+      <div class="two">
+        <div class="form-row"><label for="fmtName">Name</label><input class="input" id="fmtName" placeholder="General"></div>
+        <div class="form-row"><label for="fmtUse">Used for</label>
+          <select class="input" id="fmtUse">
+            <option value="general">Companies except banks (General)</option>
+            <option value="bank">Banks</option>
+            <option value="reit">REITs and business trusts</option>
+            <option value="insurance">Insurers</option>
+            <option value="other">Other (describe below)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row" id="fmtDescRow" hidden><label for="fmtDesc">Which companies</label>
+        <input class="input" id="fmtDesc" placeholder="e.g. Shipping trusts reporting charter income"></div>
+      <div class="form-row">
+        <span class="lbl">Start from ShareInvestor</span>
+        <div class="drop" id="fmtDrop">
+          <span class="sun-circle"><svg class="i"><use href="#i-upload"/></svg></span>
+          <span><span class="fname" id="fmtFileName">Choose or drop an Excel / CSV export</span><br><span class="muted" style="font-size:13px">Or paste rows copied from ShareInvestor’s Financials page below and press Read.</span></span>
+          <input type="file" id="fmtFile" accept=".xlsx,.xlsm,.csv,.txt" aria-label="ShareInvestor export">
+        </div>
+      </div>
+      <div class="form-row">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+          <label for="fmtText">Entries</label>
+          <button type="button" class="link-btn" id="fmtRead" style="color:var(--color-ember-deep)">Read pasted rows</button>
+        </div>
+        <textarea class="input mono" id="fmtText" rows="16" spellcheck="false"></textarea>
+        <p class="help">One entry per line, in order. <span class="mono">[Balance Sheet]</span> starts a statement,
+          <span class="mono"># </span>marks a heading and <span class="mono">= </span>a bold total.
+          Add <span class="mono">:= Revenue + Cost of Goods Sold</span> to calculate an entry from others (use + and −);
+          a figure the filing prints is kept.</p>
+      </div>
+      <div class="notice" id="fmtProblems" hidden></div>
+    </div>
+  </div>
+  <div class="sheet-foot">
+    <button type="button" class="btn btn-ember btn-lg btn-block" id="fmtSave">Save format</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+      <button type="button" class="link-btn" id="fmtExport">Download as JSON</button>
+      <button type="button" class="link-btn" id="fmtDelete" hidden style="color:var(--trip-lacquer)">Remove my changes</button>
+    </div>
+  </div>
 </dialog>
 
 <script src="/app.js"></script>

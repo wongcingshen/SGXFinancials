@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import hmac
+import json
 import os
 import re
 import sys
@@ -121,6 +122,27 @@ def screen():
         for a in anns])
 
 
+@api("formats", "GET", public=True)
+def list_formats():
+    from sgx_fin import formats as F, template as T
+    return jsonify(formats=[{**T.to_json(f), "marked": F.to_marked(T.to_json(f))} for f in T.BUILTIN.values()])
+
+
+@api("parse_format", "POST")
+def parse_format():
+    """A format from a ShareInvestor export (.xlsx/.csv), pasted rows, or the editable text."""
+    from sgx_fin import formats as F, template as T
+    f = request.form
+    up = request.files.get("file")
+    try:
+        fmt = F.parse(f.get("name", ""), f.get("applies_to", ""), text=f.get("text", ""),
+                      filename=up.filename if up else "", data=up.read() if up else b"", base=f.get("base") or None,
+                      fmt_id=f.get("id", ""))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(format=fmt, marked=F.to_marked(fmt), problems=T.formula_problems(T.check_format(fmt)))
+
+
 @api("attachments", "GET")
 def attachment_links():
     # On Vercel /api/browse is the Node browser function; this covers local runs of this app.
@@ -142,6 +164,11 @@ def process():
             "filing": f.get("title", "")}
     WORK.mkdir(parents=True, exist_ok=True)
     client = SGXClient()
+    from sgx_fin import template as T
+    try:  # formats imported / edited in the web app replace or add to the built-in ones
+        formats = T.resolve(json.loads(f.get("formats") or "[]"))
+    except (ValueError, TypeError) as e:
+        return jsonify(error=f"A saved statement format is invalid: {e}"), 400
 
     # 1. The PDF to read: an uploaded file, or the attachment of an announcement that holds the
     #    financial statements (chosen by file name, then by a keyword scan of its pages).
@@ -211,10 +238,10 @@ def process():
             f"with {where.title()} ticked, then Deployments → Redeploy.")), 500
     ai_started = time.monotonic()
     res = process_pdf(pdf, scan=scan, pages=chosen, meta=meta,
-                      effort=f.get("effort", "high"), cache_dir=WORK, deadline=deadline)
+                      effort=f.get("effort", "high"), cache_dir=WORK, deadline=deadline, formats=formats)
     timings["ai"] = round(time.monotonic() - ai_started, 1)
     existing = request.files["workbook"].read() if request.files.get("workbook") else None
-    data, checks = workbook_bytes(existing, res.normalised, res.meta)
+    data, checks = workbook_bytes(existing, res.normalised, res.meta, formats)
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", res.meta.get("stock_code") or res.meta.get("company_name") or "").strip("_") or "financials"
     return jsonify(
         scan=scan_info, pages=chosen, extracted=True, meta=res.meta, usage=res.usage, checks=checks, timings=timings,

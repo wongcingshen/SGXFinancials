@@ -74,15 +74,16 @@ def merge_records(existing: list[dict], normalised: dict, meta: dict) -> list[di
 
 
 # ------------------------------------------------------------------ writing
-def write_workbook(path: Path, normalised: dict, meta: dict) -> tuple[Path, list[dict]]:
+def write_workbook(path: Path, normalised: dict, meta: dict, formats: dict | None = None) -> tuple[Path, list[dict]]:
     """Merge into the workbook at `path` (created if missing) and save it."""
-    data, checks = workbook_bytes(path.read_bytes() if path.exists() else None, normalised, meta)
+    data, checks = workbook_bytes(path.read_bytes() if path.exists() else None, normalised, meta, formats)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
     return path, checks
 
 
-def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict) -> tuple[bytes, list[dict]]:
+def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
+                   formats: dict | None = None) -> tuple[bytes, list[dict]]:
     """Merge into an existing workbook (or start fresh) and return the new .xlsx bytes."""
     records = merge_records(_load_store(existing), normalised, meta)
     wb = Workbook()
@@ -93,9 +94,9 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict) -> tupl
     # A bank gets the bank layout; the newest filing decides if a workbook somehow has both.
     fmt = next((r.get("format") for r in sorted(records, key=lambda r: r["period_end"], reverse=True)
                 if r.get("format")), meta.get("format") or "general")
-    for st, (title, _) in T.STATEMENTS.items():
-        rows = T.rows_for(st, fmt)
-        ws = wb.create_sheet(title)
+    for st in T.STATEMENT_IDS:
+        rows, title = T.rows_for(st, fmt, formats), T.title_for(st, fmt, formats)
+        ws = wb.create_sheet(T.STATEMENT_TITLES[st])  # fixed sheet names; the format's title goes in A2
         recs = [r for r in records if r["statement"] == st]
         # Group columns by length (full year, 9M, half year, quarter), latest first within each,
         # so quarters and years aren't interleaved; balance sheet dates simply by date.
@@ -104,7 +105,7 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict) -> tupl
 
     checks = run_checks(records)
     _write_checks(wb.create_sheet("Checks"), checks)
-    _write_sources(wb.create_sheet("Source Map"), records)
+    _write_sources(wb.create_sheet("Source Map"), records, formats)
 
     store = wb.create_sheet("_store")
     for r in records:
@@ -189,7 +190,7 @@ def run_checks(records: list[dict]) -> list[dict]:
                 continue
             if not any(k in v for k in (*parts, total)):
                 continue  # a check for the other format (bank vs general)
-            if str(r.get("labels", {}).get(total, "")).startswith("computed"):
+            if str(r.get("labels", {}).get(total, "")).startswith(("computed", "formula")):
                 status, diff = "derived", None  # the total was calculated from these parts
             elif total not in v or parts[0] not in v or parts[1] not in v:
                 status, diff = "n/a", None
@@ -216,12 +217,12 @@ def _write_checks(ws, checks):
         ws.column_dimensions[col].width = w
 
 
-def _write_sources(ws, records):
+def _write_sources(ws, records, formats=None):
     ws.append(["Statement", "Period", "Template line", "Company's label", "Filing", "Source PDF", "Pages", "Model"])
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = HEAD_FILL
-    labels = T.labels()
+    labels = T.labels(formats)
     for r in records:
         for k in r["values"]:
             ws.append([r["statement"], period_label(r["period_end"], r["months"]), labels.get(k, k),

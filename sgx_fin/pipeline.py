@@ -110,7 +110,8 @@ def choose_financial_pdf(client: SGXClient, links: list[tuple[str, str]], folder
 def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | None = None,
                 model: str | None = None, effort: str = "high",
                 dry_run: bool = False, meta: dict | None = None,
-                cache_dir: Path | None = None, deadline: float | None = None) -> Result:
+                cache_dir: Path | None = None, deadline: float | None = None,
+                formats: dict | None = None) -> Result:
     scan = scan or cached_scan(pdf) or scan_pdf(pdf)
     pages = pages or default_pages(scan)
     result = Result(pdf, scan, pages, meta=dict(meta or {}))
@@ -120,14 +121,14 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
     # The AI finds the statements itself when the keyword scan couldn't, or when pages were chosen by hand.
     locate = vision or not scan.found_all or set(pages) != set(scan.all_selected)
     ex = extractor.extract(pdf, pages, model=model, effort=effort, cache_dir=cache_dir, vision=vision,
-                           locate=locate, deadline=deadline)
-    result.normalised = extractor.normalise(ex.data)
+                           locate=locate, deadline=deadline, formats=formats)
+    result.normalised = extractor.normalise(ex.data, formats)
     result.usage = ex.usage
     result.meta.update({
         "company_name": result.meta.get("company_name") or ex.data.get("company_name", ""),
         "currency": ex.data.get("currency", ""),
         "basis": ex.data.get("basis", ""),
-        "format": ex.data.get("format") if ex.data.get("format") in ("general", "bank") else "general",
+        "format": result.normalised["income_statement"]["format"],
         "notes": ex.data.get("notes", ""),
         "source_pdf": pdf.name,
         "pages": ",".join(map(str, pages)),

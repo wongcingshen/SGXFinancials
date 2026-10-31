@@ -1,0 +1,460 @@
+{
+ "id": "bank",
+ "name": "Bank",
+ "applies_to": "Banks: statements show interest earned/expended (interest income/expense), deposits and loans/advances.",
+ "statements": {
+  "income_statement": {
+   "title": "Income Statement",
+   "rows": [
+    {
+     "key": "interest_income",
+     "label": "Interest Income",
+     "kind": "item",
+     "hint": "Interest earned / interest income on advances, investments and balances with banks; positive"
+    },
+    {
+     "key": "interest_expense",
+     "label": "Interest Expense",
+     "kind": "item",
+     "hint": "Interest expended / interest expense on deposits and borrowings; negative"
+    },
+    {
+     "key": "net_interest_income",
+     "label": "Net Interest Income",
+     "kind": "total",
+     "hint": "Net interest income as printed; leave out if not printed"
+    },
+    {
+     "key": "fee_income",
+     "label": "Fee & Commission Income",
+     "kind": "item",
+     "hint": "Net fee and commission income"
+    },
+    {
+     "key": "other_non_interest_income",
+     "label": "Other Non-Interest Income",
+     "kind": "item",
+     "hint": "Trading, investment, insurance and other income (a bank's 'Other income'), excluding fees if shown separately"
+    },
+    {
+     "key": "total_operating_income",
+     "label": "Total Operating Income",
+     "kind": "total",
+     "hint": "Total operating income NET of interest expense, if printed. Not an Indian bank's 'Total Income', which includes gross interest earned"
+    },
+    {
+     "key": "staff_costs",
+     "label": "Staff Costs",
+     "kind": "item",
+     "hint": "Employee costs / payments to and provisions for employees; negative"
+    },
+    {
+     "key": "other_operating_expenses_bank",
+     "label": "Other Operating Expenses",
+     "kind": "item",
+     "hint": "Other operating expenses (premises, depreciation, other); negative"
+    },
+    {
+     "key": "total_operating_expenses",
+     "label": "Total Operating Expenses",
+     "kind": "total",
+     "hint": "Operating expenses total; negative"
+    },
+    {
+     "key": "operating_profit_pre_provisions",
+     "label": "Operating Profit before Allowances",
+     "kind": "total",
+     "hint": "Operating profit before provisions and contingencies"
+    },
+    {
+     "key": "allowances",
+     "label": "Allowances / Provisions for Credit Losses",
+     "kind": "item",
+     "hint": "Provisions (other than tax) and contingencies, allowances for credit and other losses; negative"
+    },
+    {
+     "key": "share_associates",
+     "label": "Share of Results of Associates",
+     "kind": "item",
+     "hint": "Share of profit/(loss) of associates and joint ventures"
+    },
+    {
+     "key": "exceptional_items",
+     "label": "Exceptional Items",
+     "kind": "item",
+     "hint": "Exceptional / extraordinary items on the face of the statement"
+    },
+    {
+     "key": "profit_before_tax",
+     "label": "Profit Before Tax",
+     "kind": "total",
+     "hint": "Profit/(loss) before tax"
+    },
+    {
+     "key": "tax",
+     "label": "Taxation",
+     "kind": "item",
+     "hint": "Tax expense; negative"
+    },
+    {
+     "key": "profit_after_tax",
+     "label": "Profit After Tax",
+     "kind": "total",
+     "hint": "Net profit for the period"
+    },
+    {
+     "key": "pat_shareholders",
+     "label": "Profit Attributable to Shareholders",
+     "kind": "total",
+     "hint": "Attributable to owners / equity holders of the bank (Group)"
+    },
+    {
+     "key": "pat_minority",
+     "label": "Minority Interests",
+     "kind": "item",
+     "hint": "Attributable to non-controlling / minority interest"
+    },
+    {
+     "key": "eps_basic",
+     "label": "EPS - Basic (cents)",
+     "kind": "item",
+     "hint": "Basic EPS in the currency's minor unit (cents, paise: x100 if printed in dollars / rupees)"
+    },
+    {
+     "key": "eps_diluted",
+     "label": "EPS - Diluted (cents)",
+     "kind": "item",
+     "hint": "Diluted EPS in the currency's minor unit"
+    }
+   ]
+  },
+  "balance_sheet": {
+   "title": "Balance Sheet",
+   "rows": [
+    {
+     "key": "h_assets",
+     "label": "Assets",
+     "kind": "header"
+    },
+    {
+     "key": "cash_central_bank",
+     "label": "Cash & Balances with Central Banks",
+     "kind": "item",
+     "hint": "Cash in hand and balances with the central bank (e.g. Reserve Bank of India, MAS)"
+    },
+    {
+     "key": "due_from_banks",
+     "label": "Due from Banks / Placements",
+     "kind": "item",
+     "hint": "Balances with banks, money at call and short notice, placements with banks"
+    },
+    {
+     "key": "bank_investments",
+     "label": "Investments & Securities",
+     "kind": "item",
+     "hint": "Investments, government and other securities"
+    },
+    {
+     "key": "loans_advances",
+     "label": "Loans & Advances to Customers",
+     "kind": "item",
+     "hint": "Advances / loans and advances to customers, net of allowances"
+    },
+    {
+     "key": "ppe",
+     "label": "Fixed Assets",
+     "kind": "item",
+     "hint": "Fixed assets / property and equipment"
+    },
+    {
+     "key": "other_assets",
+     "label": "Other Assets",
+     "kind": "item",
+     "hint": "Other assets, derivatives, goodwill and intangibles"
+    },
+    {
+     "key": "total_assets",
+     "label": "Total Assets",
+     "kind": "total",
+     "hint": "Total assets (an Indian bank's 'Total' of assets)"
+    },
+    {
+     "key": "h_liabilities",
+     "label": "Liabilities",
+     "kind": "header"
+    },
+    {
+     "key": "customer_deposits",
+     "label": "Deposits from Customers",
+     "kind": "item",
+     "hint": "Deposits"
+    },
+    {
+     "key": "due_to_banks",
+     "label": "Due to Banks",
+     "kind": "item",
+     "hint": "Deposits and balances of banks, if separate from customer deposits"
+    },
+    {
+     "key": "bank_borrowings",
+     "label": "Borrowings & Debt Issued",
+     "kind": "item",
+     "hint": "Borrowings, debt securities, subordinated debt"
+    },
+    {
+     "key": "other_liabilities",
+     "label": "Other Liabilities & Provisions",
+     "kind": "item",
+     "hint": "Other liabilities and provisions, derivatives"
+    },
+    {
+     "key": "total_liabilities",
+     "label": "Total Liabilities",
+     "kind": "total",
+     "hint": "Printed total; leave out if not printed"
+    },
+    {
+     "key": "h_equity",
+     "label": "Shareholders' Equity",
+     "kind": "header"
+    },
+    {
+     "key": "share_capital",
+     "label": "Share Capital",
+     "kind": "item",
+     "hint": "Capital"
+    },
+    {
+     "key": "reserves",
+     "label": "Reserves",
+     "kind": "item",
+     "hint": "Reserves and surplus / retained earnings + other reserves"
+    },
+    {
+     "key": "perpetual_securities",
+     "label": "Perpetual Securities",
+     "kind": "item",
+     "hint": "Additional tier 1 / perpetual capital securities in equity"
+    },
+    {
+     "key": "shareholders_equity",
+     "label": "Total Shareholders' Equity",
+     "kind": "total",
+     "hint": "Equity attributable to owners; leave out if not printed"
+    },
+    {
+     "key": "minority_interests",
+     "label": "Minority Interests",
+     "kind": "item",
+     "hint": "Non-controlling / minority interest"
+    },
+    {
+     "key": "total_equity",
+     "label": "Total Equity",
+     "kind": "total",
+     "hint": "Total equity; leave out if not printed"
+    }
+   ]
+  },
+  "cash_flow": {
+   "title": "Cash Flow",
+   "rows": [
+    {
+     "key": "h_op",
+     "label": "Operating Activities",
+     "kind": "header"
+    },
+    {
+     "key": "cf_pbt",
+     "label": "Profit Before Tax",
+     "kind": "item",
+     "hint": "Starting line of the indirect method (profit before tax or profit for the period)"
+    },
+    {
+     "key": "cf_dep_amort",
+     "label": "Depreciation & Amortisation",
+     "kind": "item",
+     "hint": "Sum of depreciation and amortisation add-backs"
+    },
+    {
+     "key": "cf_other_adj",
+     "label": "Other Non-Cash Adjustments",
+     "kind": "item",
+     "hint": "All other adjustments (interest, impairments, gains/losses, share of associates...) combined"
+    },
+    {
+     "key": "cf_op_before_wc",
+     "label": "Operating Cash Flow Before Working Capital Changes",
+     "kind": "total"
+    },
+    {
+     "key": "cf_wc_changes",
+     "label": "Working Capital Changes",
+     "kind": "item",
+     "hint": "Total of changes in inventories, receivables, payables, etc."
+    },
+    {
+     "key": "cf_cash_from_ops",
+     "label": "Cash Generated from Operations",
+     "kind": "total"
+    },
+    {
+     "key": "cf_interest_paid_op",
+     "label": "Interest Paid",
+     "kind": "item",
+     "hint": "Only if classified in operating activities; negative"
+    },
+    {
+     "key": "cf_interest_recv_op",
+     "label": "Interest Received",
+     "kind": "item",
+     "hint": "Only if classified in operating activities"
+    },
+    {
+     "key": "cf_tax_paid",
+     "label": "Income Tax Paid",
+     "kind": "item",
+     "hint": "Negative"
+    },
+    {
+     "key": "cf_net_operating",
+     "label": "Net Cash from Operating Activities",
+     "kind": "total"
+    },
+    {
+     "key": "h_inv",
+     "label": "Investing Activities",
+     "kind": "header"
+    },
+    {
+     "key": "cf_capex",
+     "label": "Purchase of Property, Plant & Equipment",
+     "kind": "item",
+     "hint": "Capex incl. investment properties and intangibles if combined; negative"
+    },
+    {
+     "key": "cf_disposal_ppe",
+     "label": "Proceeds from Disposal of PPE",
+     "kind": "item"
+    },
+    {
+     "key": "cf_acquisitions",
+     "label": "Acquisition of Subsidiaries / Investments",
+     "kind": "item",
+     "hint": "Acquisition of subsidiaries net of cash, investments in associates/JVs/financial assets; negative"
+    },
+    {
+     "key": "cf_disposal_inv",
+     "label": "Proceeds from Disposal of Investments",
+     "kind": "item"
+    },
+    {
+     "key": "cf_dividends_recv",
+     "label": "Dividends Received",
+     "kind": "item"
+    },
+    {
+     "key": "cf_interest_recv_inv",
+     "label": "Interest Received (Investing)",
+     "kind": "item"
+    },
+    {
+     "key": "cf_other_investing",
+     "label": "Other Investing Activities",
+     "kind": "item"
+    },
+    {
+     "key": "cf_net_investing",
+     "label": "Net Cash from Investing Activities",
+     "kind": "total"
+    },
+    {
+     "key": "h_fin",
+     "label": "Financing Activities",
+     "kind": "header"
+    },
+    {
+     "key": "cf_borrowings_proceeds",
+     "label": "Proceeds from Borrowings",
+     "kind": "item"
+    },
+    {
+     "key": "cf_borrowings_repaid",
+     "label": "Repayment of Borrowings",
+     "kind": "item",
+     "hint": "Negative"
+    },
+    {
+     "key": "cf_lease_payments",
+     "label": "Payment of Lease Liabilities",
+     "kind": "item",
+     "hint": "Principal portion of lease payments; negative"
+    },
+    {
+     "key": "cf_interest_paid_fin",
+     "label": "Interest Paid (Financing)",
+     "kind": "item",
+     "hint": "Negative"
+    },
+    {
+     "key": "cf_dividends_paid",
+     "label": "Dividends Paid",
+     "kind": "item",
+     "hint": "To owners and non-controlling interests combined; negative"
+    },
+    {
+     "key": "cf_share_issue",
+     "label": "Proceeds from Issue of Shares",
+     "kind": "item"
+    },
+    {
+     "key": "cf_share_buyback",
+     "label": "Purchase of Treasury Shares",
+     "kind": "item",
+     "hint": "Negative"
+    },
+    {
+     "key": "cf_other_financing",
+     "label": "Other Financing Activities",
+     "kind": "item"
+    },
+    {
+     "key": "cf_net_financing",
+     "label": "Net Cash from Financing Activities",
+     "kind": "total"
+    },
+    {
+     "key": "h_net",
+     "label": "Net Change in Cash",
+     "kind": "header"
+    },
+    {
+     "key": "cf_net_change",
+     "label": "Net Increase/(Decrease) in Cash",
+     "kind": "total"
+    },
+    {
+     "key": "cf_cash_begin",
+     "label": "Cash at Beginning of Period",
+     "kind": "item"
+    },
+    {
+     "key": "cf_fx_effect",
+     "label": "Effect of Exchange Rate Changes",
+     "kind": "item"
+    },
+    {
+     "key": "cf_cash_end",
+     "label": "Cash at End of Period",
+     "kind": "total"
+    },
+    {
+     "key": "free_cash_flow",
+     "label": "Free Cash Flow",
+     "kind": "item",
+     "hint": "Leave null; computed by the program as net operating cash flow + capex"
+    }
+   ]
+  }
+ }
+}
