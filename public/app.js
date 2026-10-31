@@ -108,7 +108,8 @@ async function loadHealth() {
     $("#statusText").textContent = h.ai_key ? `${state.ai} ready` : "AI key missing";
     $("#serverInfo").innerHTML = `${icon("info")}<div><b>Server</b><br>
       Model: <span class="mono">${esc(h.model || "—")}</span><br>
-      AI: ${h.ai_key ? `${esc(state.ai)} (key configured)` : "<b>no key</b> — add GEMINI_API_KEY in Vercel"}<br>
+      AI: ${h.ai_key ? `${esc(state.ai)} (key configured)` : `<b>no key</b> — add GEMINI_API_KEY to this Vercel project (${esc(h.deployment || "")}), then redeploy`}<br>
+      AI variables visible: ${esc((h.ai_vars || []).join(", ") || "none")}<br>
       App password: ${h.password_required ? "required" : "not set (anyone with the link can run extractions)"}<br>
       SGX token: ${h.sgx_token ? "configured" : "not set (only needed if SGX refuses requests)"}</div>`;
   } catch (e) {

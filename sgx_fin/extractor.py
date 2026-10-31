@@ -1,7 +1,8 @@
 """AI step: read the selected statement pages and return numbers mapped to the template.
 
 Two providers, picked from the environment (override with AI_PROVIDER=gemini|anthropic):
-  Gemini   GEMINI_API_KEY      model GEMINI_MODEL, else the first available of GEMINI_MODELS
+  Gemini   GEMINI_API_KEY      model SGX_GEMINI_MODEL, else the first available of GEMINI_MODELS
+           (GOOGLE_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_KEY also work)
   Claude   ANTHROPIC_API_KEY   model CLAUDE_MODEL, else claude-opus-5-5
 Both get the same prompt, the same PDF excerpt and the same JSON schema.
 """
@@ -23,7 +24,9 @@ from . import template as T
 CLAUDE_DEFAULT = "claude-opus-5-5"
 # Flash-Lite only: its free daily request allowance is far larger than Flash's. Tried in order
 # when a model is missing for the key or its quota is used up (each model has its own quota).
-# Set GEMINI_MODEL to pin one, e.g. gemini-3.1-pro-preview for the hardest filings.
+# Set SGX_GEMINI_MODEL to pin one, e.g. gemini-3.1-pro-preview for the hardest filings. (Not
+# GEMINI_MODEL: other apps sharing the Vercel team's variables, such as TravelFriend, use that.)
+GEMINI_KEY_VARS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GEMINI_KEY")
 GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest"]
 UNIT_FACTORS = {"units": 1, "thousands": 1_000, "millions": 1_000_000, "billions": 1_000_000_000}
 
@@ -122,6 +125,20 @@ class Extraction:
     usage: dict
 
 
+def gemini_key() -> str | None:
+    for name in GEMINI_KEY_VARS:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def ai_env_names() -> list[str]:
+    """Names (never values) of AI-related variables this deployment can see, for diagnostics."""
+    return sorted(n for n in os.environ if any(k in n.upper() for k in ("GEMINI", "GOOGLE", "ANTHROPIC", "AI_PROVIDER"))
+                  and os.environ[n].strip())
+
+
 def provider() -> str | None:
     """Which AI provider this deployment uses, or None if no key is configured."""
     choice = os.environ.get("AI_PROVIDER", "").strip().lower()
@@ -129,7 +146,7 @@ def provider() -> str | None:
         return "gemini"
     if choice in ("anthropic", "claude"):
         return "anthropic"
-    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+    if gemini_key():
         return "gemini"
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "anthropic"
@@ -139,7 +156,7 @@ def provider() -> str | None:
 def default_model(prov: str | None = None) -> str:
     prov = prov or provider()
     if prov == "gemini":
-        return os.environ.get("GEMINI_MODEL") or GEMINI_MODELS[0]
+        return os.environ.get("SGX_GEMINI_MODEL", "").strip() or GEMINI_MODELS[0]
     return os.environ.get("CLAUDE_MODEL") or CLAUDE_DEFAULT
 
 
@@ -252,10 +269,10 @@ def _gemini(pdf_bytes: bytes, instruction: str, model: str, effort: str, client)
     from google.genai import errors, types
 
     client = client or genai.Client(
-        api_key=os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"),
+        api_key=gemini_key(),
         http_options=types.HttpOptions(timeout=280_000),
     )
-    pinned = bool(os.environ.get("GEMINI_MODEL"))
+    pinned = bool(os.environ.get("SGX_GEMINI_MODEL", "").strip())
     candidates = [model] + ([] if pinned else [m for m in GEMINI_MODELS if m != model])
     schema = gemini_schema(SCHEMA)
     contents = [types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"), instruction]
@@ -289,7 +306,7 @@ def _gemini(pdf_bytes: bytes, instruction: str, model: str, effort: str, client)
         return _gemini_result(resp, name)
     if getattr(last_err, "code", None) == 429:
         raise RuntimeError(f"Gemini quota used up on {', '.join(candidates)}. "
-                           "Free-tier limits reset daily; try again later or set GEMINI_MODEL "
+                           "Free-tier limits reset daily; try again later or set SGX_GEMINI_MODEL "
                            f"to another model. ({last_err})")
     raise RuntimeError(f"No Gemini model available for this key: {last_err}")
 

@@ -7,10 +7,11 @@ Routes (the operation is also accepted as ?op=health|screen|process on any path)
 On Vercel, /api/browse (api/browse.mjs) runs the headless browser for screening and attachments.
 
 Environment variables (Vercel > Project > Settings > Environment Variables)
-  GEMINI_API_KEY      AI key for extraction (or ANTHROPIC_API_KEY to use Claude)
+  GEMINI_API_KEY      AI key for extraction (or ANTHROPIC_API_KEY to use Claude); set it on
+                      THIS Vercel project (not only another project), then redeploy
   APP_PASSWORD        recommended: callers must send it as X-App-Password
   SGX_AUTH_TOKEN      only if api.sgx.com starts rejecting anonymous requests
-  GEMINI_MODEL        optional: pin a Gemini model (CLAUDE_MODEL for Claude)
+  SGX_GEMINI_MODEL    optional: pin a Gemini model (CLAUDE_MODEL for Claude)
   AI_PROVIDER         optional: gemini | anthropic, when both keys are set
 """
 
@@ -90,6 +91,9 @@ def health():
         password_required=bool(os.environ.get("APP_PASSWORD")),
         sgx_token=bool(os.environ.get("SGX_AUTH_TOKEN")),
         model=extractor.default_model() if extractor.provider() else None,
+        deployment=os.environ.get("VERCEL_ENV", "local"),
+        project=os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL"),
+        ai_vars=extractor.ai_env_names(),
     )
 
 
@@ -177,7 +181,12 @@ def process():
 
     # 3. AI extraction on the selected pages only, then merge into the uploaded workbook (if any).
     if not extractor.provider():
-        return jsonify(error="No AI key on the server: add GEMINI_API_KEY in Vercel"), 500
+        where = os.environ.get("VERCEL_ENV", "local")
+        seen = ", ".join(extractor.ai_env_names()) or "none"
+        return jsonify(error=(
+            f"This deployment ({where}) can't see GEMINI_API_KEY (AI variables it sees: {seen}). "
+            "In Vercel open THIS project → Settings → Environment Variables, add GEMINI_API_KEY "
+            f"with {where.title()} ticked, then Deployments → Redeploy.")), 500
     res = process_pdf(pdf, scan=scan, pages=chosen, meta=meta,
                       effort=f.get("effort", "high"), cache_dir=WORK)
     existing = request.files["workbook"].read() if request.files.get("workbook") else None
