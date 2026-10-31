@@ -86,6 +86,7 @@ python tests/dev_server.py --mock      # demo data; drop --mock for the real thi
    | `APP_PASSWORD` | strongly recommended | Anyone with the URL could otherwise spend your API credits |
    | `SGX_AUTH_TOKEN` | no | Optional shortcut, see *SGX token* below |
    | `SGX_GEMINI_MODEL` | no | Pin a model. Default is Flash-Lite (largest free daily allowance): latest `gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`, then `gemini-flash-lite-latest` if one is unavailable or out of quota. Each filing uses one request. Try `gemini-3.1-pro-preview` for hard filings |
+   | `GLM_FLASH` | no | Key for **GLM 5.3 Flash**, used first for filings whose statements are pictures (Gemini takes over if it fails). An `nvapi-` key uses NVIDIA's free API catalog (the model id is looked up from the key's model list; pin it with `GLM_MODEL`); other keys use Z.ai. `GLM_MAX_IMAGES` (default 8) caps pictures per request |
    | `ANTHROPIC_API_KEY` / `CLAUDE_MODEL` | no | Use Claude (`claude-opus-5-5`) instead; with both keys set, `AI_PROVIDER=gemini\|anthropic` picks |
 
 3. Deploy. Open the site, enter the password, pick a date and click **Screen**, then
@@ -165,7 +166,9 @@ NODE_PATH=$(npm root -g) node tests/make_sample_pdf.js   # regenerate the sample
   text are detected without AI. When the statements are pictures, those pages (up to 60, plus any
   the keyword scan found) go to the AI in the same single request, at high resolution, and it finds
   the three statements among them and reads them from the images; the details panel shows the
-  pages it used. Very blurry photos can lose figures (they are left blank and mentioned in the
+  pages it used. With `GLM_FLASH` set, these filings go to GLM 5.3 Flash first: pages are sent as
+  images, and a filing with more picture pages than `GLM_MAX_IMAGES` is first skimmed at low
+  resolution to find the statements, then only those pages are read. Very blurry photos can lose figures (they are left blank and mentioned in the
   notes); `SGX_GEMINI_MODEL=gemini-3.1-pro-preview` reads difficult images better, and
   "Wrong pages?" narrows a long scanned document to the right pages.
 - Banks, insurers and REITs use different statement formats; figures map to the closest lines and

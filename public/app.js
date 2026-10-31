@@ -114,6 +114,7 @@ async function loadHealth() {
     $("#serverInfo").innerHTML = `${icon("info")}<div><b>Server</b><br>
       Model: <span class="mono">${esc(h.model || "—")}</span><br>
       AI: ${h.ai_key ? `${esc(state.ai)} (key configured)` : `<b>no key</b> — add GEMINI_API_KEY to this Vercel project (${esc(h.deployment || "")}), then redeploy`}<br>
+      Photo filings: ${h.photo_model ? `${esc(h.photo_model)}, then ${esc(state.ai)}` : `${esc(state.ai)} (set GLM_FLASH to use GLM 5.3 Flash)`}<br>
       AI variables visible: ${esc((h.ai_vars || []).join(", ") || "none")}<br>
       App password: ${h.password_required ? "required" : "not set (anyone with the link can run extractions)"}<br>
       SGX token: ${h.sgx_token ? "configured" : "not set (only needed if SGX refuses requests)"}</div>`;
@@ -172,7 +173,7 @@ const BUSY = { queued: "Queued", reading: "Reading PDF…", ai: () => `${state.a
 function cardHtml(a, i) {
   const j = a.job;
   const busy = j.status in BUSY;
-  const label = typeof BUSY[j.status] === "function" ? BUSY[j.status]() : BUSY[j.status];
+  const label = j.status === "ai" ? `${j.ai || state.ai} reading…` : BUSY[j.status];
   const pass = j.result ? j.result.checks.filter((c) => c.status === "PASS").length : 0;
   const fail = j.result ? j.result.checks.filter((c) => c.status === "FAIL").length : 0;
   const pill = j.status === "done" ? `${icon("check", "width:14px;height:14px")}Excel ready`
@@ -385,6 +386,7 @@ async function extract(a, { pages } = {}) {
     }
     j.scan = scanRes;
     if (!scanRes.pages.length) throw new Error("The keyword scan found no statement pages. Open the details to choose pages.");
+    j.ai = scanRes.scan.vision && state.health?.photo_model ? "GLM" : state.ai; // picture filings go to GLM first
     j.status = "ai";
     renderCard(a);
     // With a download folder, merge into this company's workbook if it is already there.
@@ -496,7 +498,8 @@ function scanHtml(scan, pages) {
         pages?.length ? ` · ${pages.length} page${pages.length === 1 ? "" : "s"} go to ${esc(state.ai)}` : ""}</p>
     </div>
     ${scan.vision
-      ? `<div class="notice info">${icon("eye")}<div>This filing’s statements are pictures (scanned or photographed), which a keyword scan can’t read. Its ${img.size} picture page${img.size === 1 ? "" : "s"} go to ${esc(state.ai)}, which finds the statements and reads them from the images.</div></div>`
+      ? `<div class="notice info">${icon("eye")}<div>This filing’s statements are pictures (scanned or photographed), which a keyword scan can’t read. Its ${img.size} picture page${img.size === 1 ? "" : "s"} go to ${esc(state.health?.photo_model || state.ai)}${
+        state.health?.photo_model ? ` (${esc(state.ai)} if that fails)` : ""}, which finds the statements and reads them from the images.</div></div>`
       : img.size ? `<div class="notice">${icon("alert")}<div>${img.size} page${img.size === 1 ? " is a picture" : "s are pictures"} with no readable text. If a statement is missing, enter its pages below.</div></div>` : ""}`;
 }
 

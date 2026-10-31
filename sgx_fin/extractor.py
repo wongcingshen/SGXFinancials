@@ -136,7 +136,7 @@ def gemini_key() -> str | None:
 
 def ai_env_names() -> list[str]:
     """Names (never values) of AI-related variables this deployment can see, for diagnostics."""
-    return sorted(n for n in os.environ if any(k in n.upper() for k in ("GEMINI", "GOOGLE", "ANTHROPIC", "AI_PROVIDER"))
+    return sorted(n for n in os.environ if any(k in n.upper() for k in ("GEMINI", "GOOGLE", "ANTHROPIC", "AI_PROVIDER", "GLM", "NVIDIA", "ZAI"))
                   and os.environ[n].strip())
 
 
@@ -188,23 +188,49 @@ def _instruction(pdf: Path, pages: list[int], vision: bool = False) -> str:
 
 def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str = "high",
             cache_dir: Path | None = None, client=None, vision: bool = False) -> Extraction:
-    """Send only `pages` of `pdf` to the configured provider and return the parsed JSON."""
-    prov = provider()
-    if prov is None:
-        raise RuntimeError("No AI key configured: set GEMINI_API_KEY or ANTHROPIC_API_KEY")
-    model = model or default_model(prov)
-    pdf_bytes = excerpt_pdf(pdf, pages)
-    cache_key = hashlib.sha256(pdf_bytes + f"{prov}:{model}:{vision}".encode() + SYSTEM.encode()).hexdigest()[:16]
-    cache_file = (cache_dir or pdf.parent) / f"{pdf.stem}.{cache_key}.extract.json"
-    if cache_file.exists():
-        cached = json.loads(cache_file.read_text())
-        return Extraction(cached["data"], cached["model"], cached.get("usage", {}))
+    """Send only `pages` of `pdf` to the AI and return the parsed JSON.
 
+    Picture filings (vision=True) go to GLM 5.3 Flash first when GLM_FLASH is set, falling back to
+    the main provider (Gemini / Claude) if it fails; everything else goes to the main provider.
+    """
+    from . import glm
+
+    prov = provider()
+    attempts = []
+    if vision and glm.api_key() and not model:
+        attempts.append("glm")
+    if prov:
+        attempts.append(prov)
+    if not attempts:
+        raise RuntimeError("No AI key configured: set GEMINI_API_KEY (or GLM_FLASH for picture filings)")
+
+    pdf_bytes = excerpt_pdf(pdf, pages)
     instruction = _instruction(pdf, pages, vision)
-    ex = (_gemini(pdf_bytes, instruction, model, effort, client, vision) if prov == "gemini"
-          else _claude(pdf_bytes, instruction, model, effort, client))
-    cache_file.write_text(json.dumps({"data": ex.data, "model": ex.model, "usage": ex.usage}, indent=2))
-    return ex
+    failures = []
+    for who in attempts:
+        name = glm.label() if who == "glm" else (model or default_model(who))
+        cache_key = hashlib.sha256(pdf_bytes + f"{who}:{name}:{vision}".encode() + SYSTEM.encode()).hexdigest()[:16]
+        cache_file = (cache_dir or pdf.parent) / f"{pdf.stem}.{cache_key}.extract.json"
+        if cache_file.exists():
+            cached = json.loads(cache_file.read_text())
+            return Extraction(cached["data"], cached["model"], cached.get("usage", {}))
+        try:
+            if who == "glm":
+                data, used, usage = glm.extract(pdf, pages, SYSTEM, instruction)
+                ex = Extraction(data, f"{used} via {'NVIDIA' if glm.is_nvidia() else 'Z.ai'}",
+                                {"input_tokens": usage.get("prompt_tokens"), "output_tokens": usage.get("completion_tokens")})
+            elif who == "gemini":
+                ex = _gemini(pdf_bytes, instruction, name, effort, client, vision)
+            else:
+                ex = _claude(pdf_bytes, instruction, name, effort, client)
+        except Exception as e:  # try the next provider, report all if none works
+            failures.append(f"{glm.label() if who == 'glm' else provider_label(who)}: {e}")
+            continue
+        if failures:
+            ex.data["notes"] = (f"{ex.data.get('notes', '')} (Read by {ex.model} after: {'; '.join(failures)})").strip()
+        cache_file.write_text(json.dumps({"data": ex.data, "model": ex.model, "usage": ex.usage}, indent=2))
+        return ex
+    raise RuntimeError(" | ".join(failures))
 
 
 # ------------------------------------------------------------------ Claude

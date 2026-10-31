@@ -7,6 +7,7 @@ Routes (the operation is also accepted as ?op=health|screen|process on any path)
 On Vercel, /api/browse (api/browse.mjs) runs the headless browser for screening and attachments.
 
 Environment variables (Vercel > Project > Settings > Environment Variables)
+  GLM_FLASH           optional: NVIDIA (nvapi-) or Z.ai key; picture filings go to GLM 5.3 Flash first
   GEMINI_API_KEY      AI key for extraction (or ANTHROPIC_API_KEY to use Claude); set it on
                       THIS Vercel project (not only another project), then redeploy
   APP_PASSWORD        recommended: callers must send it as X-App-Password
@@ -83,6 +84,11 @@ def dispatch(path: str):
     return jsonify(error=f"No route for {request.method} {request.path} (op={op or '-'})"), 404
 
 
+def _photo_model() -> str | None:
+    from sgx_fin import glm
+    return glm.label() if glm.api_key() else None
+
+
 @api("health", "GET", public=True)
 def health():
     return jsonify(
@@ -95,6 +101,7 @@ def health():
         deployment=os.environ.get("VERCEL_ENV", "local"),
         project=os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL"),
         ai_vars=extractor.ai_env_names(),
+        photo_model=_photo_model(),
     )
 
 
@@ -188,7 +195,8 @@ def process():
                        message=None if chosen else "No statement pages found; pass pages manually.")
 
     # 3. AI extraction on the selected pages only, then merge into the uploaded workbook (if any).
-    if not extractor.provider():
+    from sgx_fin import glm
+    if not extractor.provider() and not (scan.needs_vision and glm.api_key()):
         where = os.environ.get("VERCEL_ENV", "local")
         seen = ", ".join(extractor.ai_env_names()) or "none"
         return jsonify(error=(

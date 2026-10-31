@@ -188,6 +188,76 @@ def test_picture_statements_go_to_the_ai_to_find():
     assert used.endswith("k=odd")
 
 
+def test_picture_filings_read_by_glm_on_nvidia():
+    import os
+    import shutil
+    from sgx_fin import glm
+
+    out = HERE / "out" / "glm"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    pic = picture_pdf(HERE / "sample_results.pdf", out / "photos.pdf")
+    saved = {k: os.environ.pop(k, None) for k in ("GLM_FLASH", "GLM_MODEL", "GLM_MAX_IMAGES", "GLM_BASE_URL", "GLM_API_KEY",
+                                                 "ZAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY")}
+    os.environ["GLM_FLASH"] = "nvapi-test"
+    glm._listed.clear()
+    answer = json.loads(json.dumps(FAKE))
+    answer["income_statement"]["rows"][0]["values"] = ["120,512", "(1,000)"]  # strings, as GLM may send them
+    for st, nums in (("income_statement", [1]), ("balance_sheet", [2, 3]), ("cash_flow", [4])):
+        answer[st]["page_numbers"] = nums
+    calls = []
+
+    class Resp:
+        def __init__(self, body, status=200): self.body, self.status_code, self.ok, self.text = body, status, status < 400, json.dumps(body)
+        def json(self): return self.body
+
+    def get(url, **kw):
+        calls.append(("GET", url))
+        return Resp({"data": [{"id": "meta/llama-3.1-8b-instruct"}, {"id": "z-ai/glm-5.3-flash"}]})
+
+    def post(url, json=None, **kw):
+        content = json["messages"][1]["content"]
+        images = [c for c in content if c["type"] == "image_url"]
+        calls.append(("POST", url, json["model"], len(images)))
+        if "Which pages hold" in content[-1]["text"]:  # locating step for long filings
+            return Resp({"choices": [{"message": {"content": '{"income_statement": [4], "balance_sheet": [5, 6], "cash_flow": [7]}'}}]})
+        text = "<think>the {statements} are on pages...</think>```json\n" + __import__("json").dumps(answer) + "\n```"
+        return Resp({"choices": [{"message": {"content": text}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 9000, "completion_tokens": 900}})
+
+    real_get, real_post = glm.requests.get, glm.requests.post
+    glm.requests.get, glm.requests.post = get, post
+    try:
+        assert glm.is_nvidia() and glm.models()[0] == "z-ai/glm-5.3-flash"
+        ex = extractor.extract(pic, [4, 5, 6, 7], cache_dir=out, vision=True)
+        assert ex.model == "z-ai/glm-5.3-flash via NVIDIA"
+        assert calls[-1] == ("POST", "https://integrate.api.nvidia.com/v1/chat/completions", "z-ai/glm-5.3-flash", 4)
+        assert ex.data["income_statement"]["rows"][0]["values"] == [120512.0, -1000.0]
+        assert ex.data["balance_sheet"]["page_numbers"] == [2, 3]  # positions in the pages sent
+
+        # Long picture filing: skim previews to find the statements, then read only those pages.
+        os.environ["GLM_MAX_IMAGES"] = "3"
+        calls.clear()
+        ex = extractor.extract(pic, list(range(1, 9)), cache_dir=out, vision=True)
+        posts = [c for c in calls if c[0] == "POST"]
+        assert [c[3] for c in posts] == [6, 2, 3], posts  # 2 skim batches (6 + 2 pages), then 3 pages read
+        assert ex.data["income_statement"]["page_numbers"] == [4]  # page 4 of the 8 sent
+
+        # GLM failing: Gemini takes over (no Gemini key here, so the error lists both).
+        glm.requests.post = lambda url, **kw: Resp({"error": "busy"}, 503)
+        try:
+            extractor.extract(pic, [1, 2], cache_dir=out, vision=True)
+            raise AssertionError("expected failure")
+        except RuntimeError as e:
+            assert "GLM 5.3 Flash" in str(e)
+    finally:
+        glm.requests.get, glm.requests.post = real_get, real_post
+        for k, v in saved.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+        glm._listed.clear()
+
+
 def test_workbook_and_merge():
     meta = {"company_name": "ACME HOLDINGS LIMITED", "stock_code": "ACME", "currency": "SGD", "filing": "1H2026"}
     norm = extractor.normalise(FAKE)
