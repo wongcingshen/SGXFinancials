@@ -43,7 +43,12 @@ def install_mocks():
         ("BN4", "KEPPEL LTD.", "07:00", "Financial Statements and Related Announcement::Third Quarter Business Update"),
         ("5JK", "HIAP HOE LIMITED", "21:14", "Financial Statements and Related Announcement::Half Yearly Results"),
         ("F13", "FU YU CORPORATION LIMITED", "19:40", "Financial Statements and Related Announcement::Third Quarter Results"),
+        # a notice of the results date: set aside by its title
+        ("KSH", "KSH HOLDINGS LIMITED", "17:48", "Financial Statements and Related Announcement::Notification of Results Release"),
+        # titled as results, but the PDF is a notice: caught by the content check before any AI call
+        ("NTC", "NOTICE CO LTD", "08:00", "Financial Statements and Related Announcement::Half Yearly Results"),
     ]
+    notice = ROOT / "tests" / "notice.pdf"
 
     def screen(self, s, company=None, attachments=False):
         time.sleep(0.8)
@@ -70,7 +75,7 @@ def install_mocks():
         time.sleep(0.6)
         dest_dir.mkdir(parents=True, exist_ok=True)
         out = dest_dir / (url.split("/FileOpen/")[-1].split(".ashx")[0] + ".pdf")
-        shutil.copy(sample, out)
+        shutil.copy(notice if ("KSH_" in url or "NTC_" in url) else sample, out)
         return out
 
     def extract(pdf, pages, **kw):

@@ -168,7 +168,8 @@ function filesLine(a) {
   const used = usedUrl && a.attachments.find((f) => f.url === usedUrl);
   if (used) {
     const others = a.attachments.filter((f) => f !== used);
-    return `<span class="files used">${icon("check", "width:14px;height:14px")}<span>Extracted from ${link(used)}${
+    const verb = a.job?.status === "skipped" ? "Checked" : "Extracted from";
+    return `<span class="files used">${icon(a.job?.status === "skipped" ? "file" : "check", "width:14px;height:14px")}<span>${verb} ${link(used)}${
       others.length ? `<span class="others"> · not used: ${others.map(link).join(", ")}</span>` : ""}</span></span>`;
   }
   return `<span class="files">${icon("file", "width:14px;height:14px")}<span>${a.attachments.length} PDF${a.attachments.length === 1 ? "" : "s"}: ${a.attachments.map(link).join(", ")}</span></span>`;
@@ -184,20 +185,23 @@ function cardHtml(a, i) {
   const fail = j.result ? j.result.checks.filter((c) => c.status === "FAIL").length : 0;
   const pill = j.status === "done" ? `${icon("check", "width:14px;height:14px")}Excel ready`
     : j.status === "failed" ? `${icon("alert", "width:14px;height:14px")}Failed`
+    : j.status === "skipped" ? `${icon("x", "width:14px;height:14px")}Not results`
     : busy ? `<span class="spin" aria-hidden="true"></span>${esc(label)}${j.since ? ` <span class="elapsed" data-since="${j.since}">${clock(j.since)}</span>` : ""}`
     : `<span class="dot"></span>${esc(when(a.broadcast) || "SGX")}`;
   const action = j.status === "done"
     ? `<a class="btn btn-ember" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Excel</a>`
     : busy
       ? `<button type="button" class="btn btn-ember" disabled><span class="spin" aria-hidden="true"></span>${esc(label)}</button>`
-      : `<button type="button" class="btn btn-ember" data-extract="${i}">${icon("sparkles")}${j.status === "failed" ? "Try again" : "Extract"}</button>`;
+      : j.status === "skipped" ? `<button type="button" class="btn btn-outline" data-details="${i}">${icon("eye")}Why skipped</button>`
+      : `<button type="button" class="btn ${a.kind === "other" ? "btn-outline" : "btn-ember"}" data-extract="${i}">${icon("sparkles")}${j.status === "failed" ? "Try again" : "Extract"}</button>`;
   const saved = j.saved ? ` · ${j.merged ? "merged into" : "saved to"} folder` : j.saveError ? " · not saved to folder" : "";
   const status = j.status === "done"
     ? `<span class="card-note ${fail ? "bad" : ""}">${pass} checks pass${fail ? `, ${fail} fail` : ""}${saved}</span>`
-    : j.status === "failed" ? `<span class="card-note bad" title="${esc(j.error)}">${esc(j.error)}</span>` : "";
+    : j.status === "failed" ? `<span class="card-note bad" title="${esc(j.error)}">${esc(j.error)}</span>`
+    : j.status === "skipped" ? `<span class="card-note muted" title="${esc(j.error)}">${esc(j.error)}</span>` : "";
   const hasDetails = j.scan || j.result || j.error;
   const name = esc(nameCase(a.issuer) || a.fileName || "Unknown issuer");
-  return `<article class="card ${j.status}" data-accent="${accentFor(a.stock_code || a.issuer)}" style="animation-delay:${Math.min(i, 12) * 30}ms">
+  return `<article class="card ${j.status} ${a.kind === "other" ? "other" : ""}" data-card="${i}" data-accent="${accentFor(a.stock_code || a.issuer)}" style="animation-delay:${Math.min(i, 12) * 30}ms">
     <div class="band">
       <svg class="route" viewBox="0 0 260 104" preserveAspectRatio="none" aria-hidden="true"><path d="M20 84 C70 70 90 40 140 46 S210 20 250 14" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 7"/></svg>
       <span class="pill">${pill}</span>
@@ -215,6 +219,10 @@ function cardHtml(a, i) {
 
 function renderCards() {
   const list = state.items;
+  const nResults = list.filter((a) => a.kind !== "other").length;
+  const nOther = list.length - nResults;
+  if (state.range !== undefined)
+    $("#annNote").textContent = `${nResults} results filing${nResults === 1 ? "" : "s"}${nOther ? ` · ${nOther} other` : ""} · ${state.range}`;
   if (!list.length) {
     const d = state.debug || {};
     const saw = d.source ? `<p style="font-size:12.5px">What the browser saw: “${esc(d.title || "untitled page")}”, ${d.counts ? `${d.counts.table} rows in the table, ${d.counts.page_data} in the page data` : `${d.dom_links ?? 0} links`}.${
@@ -222,14 +230,23 @@ function renderCards() {
     $("#results").innerHTML = `<div class="intro"><div><h3 style="margin-top:0">No financial results for these dates</h3>
       <p>SGX lists nothing under Financial Statements for these dates${$("#company").value.trim() ? " and this company" : ""}. Try a wider range.</p>${saw}</div></div>`;
   } else {
-    $("#results").innerHTML = `<div class="grid">${list.map(cardHtml).join("")}</div>`;
+    const results = list.map((a, i) => [a, i]).filter(([a]) => a.kind !== "other");
+    const others = list.map((a, i) => [a, i]).filter(([a]) => a.kind === "other");
+    $("#results").innerHTML = (results.length
+      ? `<div class="grid">${results.map(([a, i]) => cardHtml(a, i)).join("")}</div>`
+      : `<p class="muted" style="margin:0">No results filings for these dates, only the notices below.</p>`)
+      + (others.length ? `<details class="others" ${state.othersOpen ? "open" : ""}><summary>${icon("file", "width:15px;height:15px")}
+          ${others.length} other announcement${others.length === 1 ? "" : "s"} in this category: notices of results dates, releases, presentations.
+          Not extracted unless you choose to.</summary>
+          <div class="grid">${others.map(([a, i]) => cardHtml(a, i)).join("")}</div></details>` : "");
+    $("#results .others")?.addEventListener("toggle", (e) => { state.othersOpen = e.target.open; });
   }
   renderBulk();
 }
 
 function renderCard(item) {
   const i = state.items.indexOf(item);
-  const el = $("#results .grid")?.children[i];
+  const el = $(`#results [data-card="${i}"]`);
   if (!el) return renderCards();
   el.outerHTML = cardHtml(item, i).replace(/animation-delay:[^"]*/, "animation:none");
   renderBulk();
@@ -247,11 +264,11 @@ function renderBulk() {
   const el = $("#bulk");
   const items = state.items;
   const done = items.filter((a) => a.job.status === "done");
-  const todo = items.filter((a) => a.job.status === "idle" || a.job.status === "failed");
+  const todo = items.filter((a) => a.kind !== "other" && (a.job.status === "idle" || a.job.status === "failed"));
   const working = items.filter((a) => a.job.status in BUSY).length;
   let html = "";
   if (state.bulk) {
-    html = `<span class="bulk-note">${done.length} of ${items.length} done</span>
+    html = `<span class="bulk-note">${done.length} of ${items.filter((x) => x.kind !== "other").length} done</span>
       <button type="button" class="btn btn-outline" id="bulkStop" ${state.bulk.stop ? "disabled" : ""}>${state.bulk.stop ? "Stopping…" : "Stop"}</button>`;
   } else {
     if (done.length > 1 || (done.length && !todo.length && !working))
@@ -284,11 +301,11 @@ async function screen(ev) {
       try { res = await api(`${route}&${q}`); break; } catch (e) { err = e; if (e.auth) break; }
     }
     if (!res) throw err;
-    state.items = res.announcements.map((a) => ({ ...a, key: a.url, job: { status: "idle" } }));
+    state.items = res.announcements.map((a) => ({ ...a, kind: a.kind || "results", key: a.url, job: { status: "idle" } }));
     state.debug = res.debug || null;
     const m = res.page_url.match(/from=(\d{8}).*?to=(\d{8})/);
     const fmt = (s) => nice(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6)}`);
-    $("#annNote").textContent = `${res.count} result${res.count === 1 ? "" : "s"} · ${m ? (m[1] === m[2] ? fmt(m[1]) : `${fmt(m[1])} – ${fmt(m[2])}`) : ""}`;
+    state.range = m ? (m[1] === m[2] ? fmt(m[1]) : `${fmt(m[1])} – ${fmt(m[2])}`) : "";
     renderCards();
   } catch (e) {
     $("#results").innerHTML = `<div class="notice error">${icon("alert")}<div><b>Couldn’t screen SGX.</b> ${esc(e.message)}</div></div>`;
@@ -422,6 +439,12 @@ async function extract(a, { pages } = {}) {
       catch (e) { j.saveError = e.message || String(e); }
     }
   } catch (e) {
+    if (e.body?.not_results) {
+      Object.assign(j, { status: "skipped", error: e.message, scan: e.body.scan ? { scan: e.body.scan, pages: [] } : null });
+      a.kind = "other";
+      renderCards();
+      return;
+    }
     Object.assign(j, { status: "failed", error: e.message || String(e) });
     if (e.auth) openSheet("#settingsSheet");
   }
@@ -430,7 +453,7 @@ async function extract(a, { pages } = {}) {
 
 async function extractAll() {
   if (state.bulk) return;
-  const queue = state.items.filter((a) => a.job.status === "idle" || a.job.status === "failed");
+  const queue = state.items.filter((a) => a.kind !== "other" && (a.job.status === "idle" || a.job.status === "failed"));
   if (!queue.length) return;
   state.bulk = { stop: false };
   for (const a of queue) a.job.status = "queued";
@@ -566,6 +589,7 @@ function showDetails(a) {
     ${scan ? scanHtml(scan.scan, scan.pages) : ""}
     ${j.result ? resultHtml(j.result) : ""}
     ${j.status === "failed" ? `<div class="notice error">${icon("alert")}<div>${esc(j.error)}</div></div>` : ""}
+    ${j.status === "skipped" ? `<div class="notice info">${icon("info")}<div>${esc(j.error)} No AI was used. If this is wrong, enter the statement pages below to extract anyway.</div></div>` : ""}
     ${j.status in BUSY ? "" : `<details ${j.status === "failed" ? "open" : ""}><summary>Wrong pages? Choose them yourself</summary>
       <form class="rerun" id="rerunForm"><label class="sr-only" for="rerunPages">Pages</label>
         <input class="input" id="rerunPages" placeholder="e.g. 7,8,9,10" value="${esc(pages)}" inputmode="numeric">

@@ -9,12 +9,14 @@ const ROWS = [
   ["30 Oct 2026", "09:18 PM", "NO VA LAND INVESTMENT GROUP CORPORATION", "", "Third Quarter Results", "N1"],
   ["30 Oct 2026", "07:39 PM", "BANK OF BARODA", "MULTIPLE", "Second Quarter and/ or Half Yearly Results", "B1"],
 ];
+// A notice in the same category: listed, but its page must not be opened.
+const NOTICE_ROW = ["30 Oct 2026", "05:48 PM", "KSH HOLDINGS LIMITED", "KSH HOLDINGS LIMITED", "Notification of Results Release", "K1"];
 const annUrl = (id) => `https://links.sgx.com/1.0.0/corporate-announcements/${id}/abc`;
 const fullTitle = (t) => `Financial Statements and Related Announcement::${t}`;
 
 // Listing laid out like sgx.com: Date & Time | Issuer Name | Security Name | Title | Category.
 function tablePage({ clickable }) {
-  const rows = ROWS.map(([d, t, issuer, sec, title, id]) => {
+  const rows = [...ROWS, NOTICE_ROW].map(([d, t, issuer, sec, title, id]) => {
     const cell = clickable
       ? `<span class="link" onclick="window.open('${annUrl(id)}', '_blank')">${fullTitle(title)}</span>`
       : `<a href="${annUrl(id)}" target="_blank">${fullTitle(title)}</a>`;
@@ -50,13 +52,17 @@ const annPage = (id) => `<!doctype html><html><body><h1>Announcement ${id}</h1>
 
 const cors = { "Access-Control-Allow-Origin": "https://www.sgx.com", "Access-Control-Allow-Headers": "authorizationtoken", "Access-Control-Allow-Methods": "GET" };
 let apiCalls = 0;
+const opened = new Set(); // announcement pages loaded
 function site(listing) {
   return async (page) => {
     await page.setRequestInterception(true);
     page.on("request", (r) => {
       const u = new URL(r.url());
       if (u.hostname === "www.sgx.com") return r.respond({ status: 200, contentType: "text/html", body: listing });
-      if (u.hostname === "links.sgx.com") return r.respond({ status: 200, contentType: "text/html", body: annPage(u.pathname.split("/")[3]) });
+      if (u.hostname === "links.sgx.com") {
+        if (r.resourceType() === "document") opened.add(u.pathname.split("/")[3]);
+        return r.respond({ status: 200, contentType: "text/html", body: annPage(u.pathname.split("/")[3]) });
+      }
       if (u.hostname === "api.sgx.com") {
         if (r.method() === "OPTIONS") return r.respond({ status: 204, headers: cors });
         if (u.pathname.endsWith("/config")) return r.respond({ status: 200, headers: cors, contentType: "application/json", body: '{"data":{"categories":[]}}' });
@@ -86,6 +92,12 @@ try {
   // Title links in the results table, every title opened for its attachments.
   const t = await screen(browser, URL_, { preparePage: site(tablePage({ clickable: false })), attachments: true });
   assert.equal(t.debug.source, "result table");
+  const notice = t.announcements.find((a) => a.issuer.startsWith("KSH"));
+  assert.equal(notice.kind, "other");
+  assert.equal(notice.attachments, undefined, "a notice is listed from its title only");
+  assert.ok(!opened.has("K1") && ["M1", "N1", "B1"].every((id) => opened.has(id)), [...opened]);
+  console.log("ok notice listed, not opened; results opened:", [...opened].join(","));
+  t.announcements = t.announcements.filter((a) => a !== notice);
   assert.deepEqual(t.announcements.map((a) => [a.broadcast, a.issuer, a.title]), [
     ["2026-10-30 23:11", "MIYOSHI LIMITED", fullTitle("Full Yearly Results")],
     ["2026-10-30 21:18", "NO VA LAND INVESTMENT GROUP CORPORATION", fullTitle("Third Quarter Results")],
@@ -98,8 +110,8 @@ try {
 
   // Titles that are click targets (open a new tab) rather than plain links.
   const c = await screen(browser, URL_, { preparePage: site(tablePage({ clickable: true })) });
-  assert.equal(c.debug.clicked, 3);
-  assert.deepEqual(c.announcements.map((a) => a.url), ROWS.map((r) => annUrl(r[5])));
+  assert.equal(c.debug.clicked, 4);
+  assert.deepEqual(c.announcements.map((a) => a.url), [...ROWS, NOTICE_ROW].map((r) => annUrl(r[5])));
   console.log("ok clicked every title:", c.announcements.length, "links");
 
   // Records the page loads for itself (non-list responses ignored), paged with the page's token.

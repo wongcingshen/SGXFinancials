@@ -244,6 +244,25 @@ def _filename(resp: requests.Response, url: str) -> str:
     return name if name.lower().endswith(".pdf") else name + ".pdf"
 
 
+# Keep in step with classifyTitle() in scraper/sgx.mjs.
+NOT_RESULTS = re.compile(
+    r"notification of (the )?results|results? release|(date|release) of (the )?(financial )?results|intends? to release"
+    r"|media release|press release|news release|presentation|slides|webcast|briefing|analyst|clarification"
+    r"|response to|reply to|queries|business update|operational update|investor day|notice of|record date"
+    r"|dividend|change of|cessation|appointment", re.I)
+IS_RESULTS = re.compile(r"results|financial statements?|financial information|financial report|unaudited|audited", re.I)
+
+
+def classify_title(title: str) -> str:
+    """'results' for a results filing, 'other' for notices, releases, presentations and the like."""
+    kind = title.split("::", 1)[1] if "::" in title else title
+    if not kind.strip():
+        return "results"
+    if NOT_RESULTS.search(kind):
+        return "other"
+    return "results" if IS_RESULTS.search(kind) else "other"
+
+
 def browser_available() -> bool:
     return bool(shutil.which("node")) and (ROOT / "node_modules" / "puppeteer-core").exists()
 

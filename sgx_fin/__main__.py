@@ -15,8 +15,8 @@ from pathlib import Path
 from . import extractor
 from .excel_writer import write_workbook
 from .page_scanner import format_report
-from .pipeline import Result, process_announcement, process_pdf
-from .sgx_client import FINANCIAL_RESULTS_CATEGORY, SGXClient, Screen
+from .pipeline import NotResults, Result, process_announcement, process_pdf
+from .sgx_client import FINANCIAL_RESULTS_CATEGORY, SGXClient, Screen, classify_title
 
 
 def _date(s: str) -> date:
@@ -78,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     screen_args(p)
     ai_args(p)
     p.add_argument("--watchlist", help="file of issuer names / stock codes, one per line")
+    p.add_argument("--all", action="store_true", help="also process notices, releases and other non-results filings")
     p.add_argument("--work", default="downloads")
 
     p = sub.add_parser("pdf", help="process a local PDF")
@@ -107,6 +108,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if client.last_debug and not anns:
         print(f"  (browser: {client.last_debug})")
+    others = [x for x in anns if (x.raw.get("kind") or classify_title(x.title)) != "results"]
+    if a.cmd == "run" and not a.all:  # notices of release dates, press releases, presentations...
+        anns = [x for x in anns if x not in others]
+        if others:
+            print(f"  skipping {len(others)} non-results announcement(s); --all to include them")
     targets = _watchlist(getattr(a, "watchlist", None))
     if targets:
         t = [x.lower() for x in targets]
@@ -121,6 +127,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n== {x.issuer}: {x.title}")
         try:
             res = process_announcement(client, x, Path(a.work), model=a.model, effort=a.effort, dry_run=a.dry_run)
+        except NotResults as e:
+            print(f"  skipped: not a results filing. {e}")
+            continue
         except Exception as e:
             print(f"  ERROR: {e}")
             continue

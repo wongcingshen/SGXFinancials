@@ -23,6 +23,13 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    without that page-generated token, which is why a browser is used.
 2. **Open every link under "Title"** (clicking titles that aren't plain links) and list the files
    inside the announcement page's `announcement-attachment-list` element.
+   Only **results filings** are opened: the Financial Statements category also carries notices
+   of the results date ("Notification of Results Release"), press and media releases,
+   presentations, business updates and replies to queries. These are recognised by title and
+   listed separately ("not extracted unless you choose to"), so screening doesn't spend time on
+   them and **Extract all** skips them. A filing whose PDF turns out to hold no statements (no
+   statement titles, no number tables, or notice wording such as "intends to release its
+   financial results") is marked "Not a results filing" before any AI call.
 3. **Pick the financial statements PDF** (no AI): attachments are tried by name, results /
    financial statements first and presentations, slides and media releases last, and the first
    one whose pages hold all three statements is used; the others are never downloaded. The card
@@ -194,7 +201,7 @@ SGX's terms of use apply to the data you retrieve; keep request volumes modest.
 ```bash
 python tests/test_offline.py               # scanner, URL mapping, schema, Excel merge
 CHROME_PATH=/path/to/chrome node tests/browse_test.mjs   # browser scraper vs a stand-in SGX site
-NODE_PATH=$(npm root -g) node tests/make_sample_pdf.js   # regenerate the sample PDF (needs playwright)
+NODE_PATH=$(npm root -g) node tests/make_sample_pdf.cjs   # regenerate the sample PDF (needs playwright)
 ```
 
 ## Limits

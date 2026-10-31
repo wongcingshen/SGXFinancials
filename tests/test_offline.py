@@ -373,6 +373,43 @@ def test_statement_formats_import_edit_and_formulas():
     assert "EBITDA" in labels_in_sheet and "Other Income" not in labels_in_sheet  # the edited format's rows
 
 
+def test_notices_and_releases_are_not_extracted():
+    import importlib.util
+    import shutil
+    from sgx_fin.pipeline import not_results_reason
+    from sgx_fin.sgx_client import classify_title
+
+    fs = "Financial Statements and Related Announcement::"
+    assert classify_title(fs + "Half Yearly Results") == "results"
+    assert classify_title(fs + "Full Yearly Results - Amendment") == "results"
+    for t in (fs + "Notification of Results Release", fs + "Third Quarter Business Update", fs + "Response to SGX Queries",
+              "DATE OF RELEASE OF FINANCIAL RESULTS FOR FIRST HALF OF FY2027", "Results Presentation 1H FY2027"):
+        assert classify_title(t) == "other", t
+
+    notice = HERE / "notice.pdf"
+    assert "notice" in not_results_reason(notice, scan_pdf(notice))
+    assert not_results_reason(HERE / "sample_results.pdf", scan_pdf(HERE / "sample_results.pdf")) is None
+    out = HERE / "out" / "notice"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    pic = picture_pdf(HERE / "sample_results.pdf", out / "photos.pdf")
+    assert not_results_reason(pic, scan_pdf(pic)) is None  # pictures may hold the statements
+
+    # The web API stops before any AI call.
+    spec = importlib.util.spec_from_file_location("vapp", HERE.parent / "api" / "index.py")
+    app = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(app)
+    called = []
+    real = extractor.extract
+    extractor.extract = lambda *a, **k: called.append(1)
+    try:
+        r = app.app.test_client().post("/api/process?op=process", content_type="multipart/form-data",
+                                       data={"pdf": (io.BytesIO(notice.read_bytes()), "notice.pdf")})
+    finally:
+        extractor.extract = real
+    assert r.status_code == 422 and r.json["not_results"] and not called
+
+
 def test_workbook_and_merge():
     meta = {"company_name": "ACME HOLDINGS LIMITED", "stock_code": "ACME", "currency": "SGD", "filing": "1H2026"}
     norm = extractor.normalise(FAKE)

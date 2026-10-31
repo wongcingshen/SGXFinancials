@@ -8,8 +8,12 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from . import extractor
-from .page_scanner import ScanResult, scan_pdf
+from .page_scanner import ScanResult, page_texts, scan_pdf
 from .sgx_client import Announcement, SGXClient
+
+
+class NotResults(Exception):
+    """The filing holds no financial statements (e.g. a notice of the results release date)."""
 
 
 @dataclass
@@ -143,6 +147,25 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
     return result
 
 
+NOTICE = re.compile(r"intends? to (?:announce|release)|will (?:be )?(?:announc|releas)\w* (?:its|the)? ?(?:unaudited |audited )?"
+                    r"(?:financial )?results|date of (?:the )?release of|release of (?:its|the) (?:financial )?results "
+                    r"(?:on|for)|notification of results", re.I)
+
+
+def not_results_reason(pdf: Path, scan: ScanResult) -> str | None:
+    """Why a PDF is not a financial results document (a release-date notice, a press release...),
+    or None. Decided without AI so such filings never reach it."""
+    if any(scan.selected.values()) or scan.image_only_pages:
+        return None  # statements found, or pictures that may hold them
+    dense = max((p.numeric_ratio for p in scan.pages), default=0)
+    first = " ".join(page_texts(pdf)[:2])
+    if NOTICE.search(first) and scan.page_count <= 4:
+        return "It's a notice of when the results will be released, not the results."
+    if dense < 0.15:
+        return "It has no financial statement tables (no statement titles and no number tables)."
+    return None
+
+
 def default_pages(scan: ScanResult) -> list[int]:
     """The pages to send to the AI: the statements the keyword scan found; when it found only some,
     a shortlist for the AI to find them in; when they are pictures, the picture pages."""
@@ -160,6 +183,9 @@ def process_announcement(client: SGXClient, ann: Announcement, work_dir: Path, *
     if not picked:
         return None
     pdf, scan, _, _ = picked
+    reason = not_results_reason(pdf, scan)
+    if reason:
+        raise NotResults(reason)
     meta = {"company_name": ann.issuer, "stock_code": ann.stock_code,
             "filing": f"{ann.broadcast} {ann.title}".strip(), "announcement_url": ann.url}
     return process_pdf(pdf, scan=scan, meta=meta, cache_dir=folder, **kw)

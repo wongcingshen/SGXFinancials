@@ -12,6 +12,20 @@ const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
 const API_HIT = /api\.sgx\.com\/announcements/i;
 
+// The Financial Statements category also carries notices that aren't results ("Notification of
+// Results Release", press releases, presentations, replies to queries). Judged by title alone, so
+// only real results get their pages opened. Keep in step with classify_title() in sgx_client.py.
+const NOT_RESULTS = /notification of (the )?results|results? release|(date|release) of (the )?(financial )?results|intends? to release|media release|press release|news release|presentation|slides|webcast|briefing|analyst|clarification|response to|reply to|queries|business update|operational update|investor day|notice of|record date|dividend|change of|cessation|appointment/i;
+const IS_RESULTS = /results|financial statements?|financial information|financial report|unaudited|audited/i;
+
+export function classifyTitle(title) {
+  const t = String(title || "");
+  const type = t.includes("::") ? t.split("::").slice(1).join("::") : t;
+  if (!type.trim()) return "results"; // just the category name: give it the benefit of the doubt
+  if (NOT_RESULTS.test(type)) return "other";
+  return IS_RESULTS.test(type) ? "results" : "other";
+}
+
 // SGX links sometimes come back protocol-relative, as http:// or as a path.
 export function normUrl(u, base = "https://links.sgx.com/") {
   if (!u) return "";
@@ -204,7 +218,10 @@ export async function screen(browser, pageUrl, opts = {}) {
     const c = opts.company.toLowerCase();
     anns = anns.filter((a) => a.issuer.toLowerCase().includes(c) || a.stock_code.toLowerCase() === c);
   }
-  if (opts.attachments) await openAll(browser, anns, opts);
+  for (const a of anns) a.kind = classifyTitle(a.title);
+  // Only results are opened for their PDFs; the rest are listed from their titles.
+  if (opts.attachments) await openAll(browser, anns.filter((a) => a.kind === "results"), opts);
+  debug.opened = anns.filter((a) => a.attachments).length;
   return { announcements: anns, debug };
 }
 

@@ -35,8 +35,9 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from sgx_fin import extractor
 from sgx_fin.excel_writer import workbook_bytes
-from sgx_fin.pipeline import attachment_name, choose_financial_pdf, default_pages, pick_best_pdf, process_pdf
-from sgx_fin.sgx_client import Announcement, SGXClient, Screen, is_sgx_url
+from sgx_fin.pipeline import (attachment_name, choose_financial_pdf, default_pages, not_results_reason,
+                              pick_best_pdf, process_pdf)
+from sgx_fin.sgx_client import Announcement, SGXClient, Screen, classify_title, is_sgx_url
 
 app = Flask(__name__, static_folder=None)
 PUBLIC = Path(__file__).resolve().parent.parent / "public"
@@ -118,7 +119,8 @@ def screen():
                          attachments=request.args.get("attachments") == "1")
     return jsonify(page_url=s.page_url, count=len(anns), debug=client.last_debug, announcements=[
         {"title": a.title, "issuer": a.issuer, "stock_code": a.stock_code, "url": a.url,
-         "broadcast": a.broadcast, "category": a.category, "attachments": a.raw.get("attachments")}
+         "broadcast": a.broadcast, "category": a.category, "attachments": a.raw.get("attachments"),
+         "kind": a.raw.get("kind") or classify_title(a.title)}
         for a in anns])
 
 
@@ -222,6 +224,9 @@ def process():
         "missing": scan.missing,
     }
     timings = {"download_and_scan": round(time.monotonic() - started, 1)}
+    reason = None if pages else not_results_reason(pdf, scan)
+    if reason:  # a notice or release: stop here, before any AI call
+        return jsonify(error=f"Not a results filing. {reason}", not_results=True, scan=scan_info, timings=timings), 422
     chosen = pages or default_pages(scan)
     if dry_run or not chosen:
         return jsonify(scan=scan_info, pages=chosen, extracted=False, timings=timings,
