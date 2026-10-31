@@ -45,10 +45,13 @@ def install_mocks():
         ("F13", "FU YU CORPORATION LIMITED", "19:40", "Financial Statements and Related Announcement::Third Quarter Results"),
     ]
 
-    def screen(self, s, company=None):
+    def screen(self, s, company=None, attachments=False):
         time.sleep(0.8)
         day = s.date_to.strftime("%Y-%m-%d")
-        anns = [Announcement(t, n, c, f"https://links.sgx.com/1.0.0/corporate-announcements/MOCK{c}", f"{day} {h}", "ANNC17", {})
+        files = lambda c: [{"name": f"{c} Results.pdf", "url": f"https://links.sgx.com/FileOpen/{c}_Results.ashx?App=Announcement&FileID=1",
+                            "from": "announcement-attachment-list"}] if attachments else None
+        anns = [Announcement(t, n, c, f"https://links.sgx.com/1.0.0/corporate-announcements/MOCK{c}", f"{day} {h}", "ANNC17",
+                             {"attachments": files(c)})
                 for c, n, h, t in issuers]
         if company:
             anns = [a for a in anns if company.lower() in a.issuer.lower() or company.lower() == a.stock_code.lower()]

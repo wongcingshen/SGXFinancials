@@ -21,8 +21,9 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    and reads the result list: the data the page loads for itself (paged through with the page's
    own token), or else the links in the result table. SGX's `api.sgx.com` refuses direct requests
    without that page-generated token, which is why a browser is used.
-2. **Open each Title link** and take the PDFs under **Attachments** (fetched directly from
-   `links.sgx.com`, or through the browser if that is refused), then download them.
+2. **Open every link under "Title"** (clicking titles that aren't plain links) and take the files
+   inside the announcement page's `announcement-attachment-list` element, then download the PDFs.
+   Each result card shows the PDFs found before you extract.
 3. **Non-AI page scan** (`sgx_fin/page_scanner.py`): scores every page against keyword sets
    (statement titles such as *"statement of financial position"*, line items such as *"total
    assets"*, *"net cash from operating activities"*, plus numeric density) and penalises notes,

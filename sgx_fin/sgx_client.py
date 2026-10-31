@@ -150,8 +150,12 @@ class SGXClient:
         self.last_debug: dict = {}
 
     # ---------------------------------------------------------------- screen
-    def screen(self, screen: Screen, company: str | None = None) -> list[Announcement]:
-        """All announcements matching the page URL, optionally filtered by company name/code."""
+    def screen(self, screen: Screen, company: str | None = None, attachments: bool = False) -> list[Announcement]:
+        """All announcements matching the page URL, optionally filtered by company name/code.
+
+        With attachments=True the browser also opens every Title link and records the PDFs in
+        its announcement-attachment-list (kept in Announcement.raw["attachments"]).
+        """
         anns = None
         if self.token:
             try:
@@ -159,7 +163,7 @@ class SGXClient:
             except PermissionError:
                 anns = None  # token expired: fall back to the browser
         if anns is None:
-            out = run_browser("screen", screen.page_url)
+            out = run_browser("screen", screen.page_url, *(["--attachments"] if attachments else []))
             self.last_debug = out.get("debug", {})
             anns = [Announcement(a["title"], a["issuer"], a["stock_code"], a["url"], a["broadcast"],
                                  a["category"], a) for a in out["announcements"]]
@@ -189,6 +193,8 @@ class SGXClient:
         """PDF attachment URLs listed on the announcement's links.sgx.com page."""
         if ann.url.lower().endswith(".pdf"):
             return [ann.url]
+        if ann.raw.get("attachments"):  # already read by the browser from announcement-attachment-list
+            return [f["url"] for f in ann.raw["attachments"] if is_sgx_url(f["url"])]
         urls: list[str] = []
         try:
             r = self.session.get(ann.url, timeout=self.timeout)
@@ -231,7 +237,7 @@ def browser_available() -> bool:
     return bool(shutil.which("node")) and (ROOT / "node_modules" / "puppeteer-core").exists()
 
 
-def run_browser(op: str, url: str) -> dict:
+def run_browser(op: str, url: str, *extra: str) -> dict:
     """Run scraper/cli.mjs (headless browser) and return its JSON output."""
     if not browser_available():
         raise RuntimeError(
@@ -239,7 +245,7 @@ def run_browser(op: str, url: str) -> dict:
             "in the project (set CHROME_PATH to a local Chrome when not on Linux x64), or set "
             "SGX_AUTH_TOKEN to query the SGX API directly."
         )
-    out = subprocess.run([shutil.which("node"), str(ROOT / "scraper" / "cli.mjs"), op, url],
+    out = subprocess.run([shutil.which("node"), str(ROOT / "scraper" / "cli.mjs"), op, url, *extra],
                          capture_output=True, text=True, timeout=300, cwd=ROOT)
     if out.returncode != 0:
         raise RuntimeError(f"Browser step failed: {out.stderr.strip()[-600:]}")

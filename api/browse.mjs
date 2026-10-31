@@ -1,5 +1,6 @@
 // Vercel Node function: drives a headless browser through the SGX website.
-//   GET /api/browse?op=screen&url=<SGX announcements page URL>&company=
+//   GET /api/browse?op=screen&url=<SGX announcements page URL>&company=&attachments=1
+//       attachments=1 also opens every Title link and lists its announcement-attachment-list PDFs
 //   GET /api/browse?op=attachments&url=<links.sgx.com announcement URL>
 import { timingSafeEqual } from "node:crypto";
 import { attachments, launchBrowser, screen } from "../scraper/sgx.mjs";
@@ -25,7 +26,10 @@ export default async function handler(req, res) {
     if (op === "attachments") {
       return res.status(200).json({ url, files: await attachments(browser, url) });
     }
-    const { announcements, debug } = await screen(browser, url, { company: q.get("company") || "" });
+    const { announcements, debug } = await screen(browser, url, {
+      company: q.get("company") || "",
+      attachments: q.get("attachments") === "1",
+    });
     return res.status(200).json({ page_url: url, count: announcements.length, announcements, debug });
   } catch (e) {
     console.error(e);

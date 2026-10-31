@@ -144,7 +144,7 @@ function renderIntro() {
 
 function renderSkeleton() {
   const bone = (w, h, extra = "") => `<div class="bone" style="width:${w};height:${h}px;${extra}"></div>`;
-  $("#results").innerHTML = `<p class="muted" style="margin:0 0 14px;font-size:14px">Opening sgx.com in a browser and reading the results. This takes 10–40 seconds.</p>
+  $("#results").innerHTML = `<p class="muted" style="margin:0 0 14px;font-size:14px">Opening sgx.com in a browser, reading the results and opening every title for its attachments. This takes about 20–90 seconds.</p>
     <div class="grid" aria-busy="true" aria-label="Loading announcements">${
     Array.from({ length: 6 }, () => `<div class="skeleton">${bone("100%", 104, "border-radius:0")}
       <div style="padding:14px 16px 16px;display:flex;flex-direction:column;gap:8px">${bone("70%", 20)}${bone("95%", 12)}${bone("60%", 12)}
@@ -164,6 +164,7 @@ function cardHtml(a, i) {
     <div class="card-body">
       <span class="name">${esc(nameCase(a.issuer) || "Unknown issuer")}</span>
       <a class="title" href="${esc(a.url)}" target="_blank" rel="noopener" title="${esc(a.title)}">${esc(shortTitle(a.title))}</a>
+      ${filesLine(a)}
       <div class="card-actions">${done
         ? `<button type="button" class="btn btn-outline" data-view="${i}">${icon("eye")}View</button>
            <a class="btn btn-ember" href="${done.url}" download="${esc(done.filename)}">${icon("download")}Excel</a>`
@@ -172,6 +173,14 @@ function cardHtml(a, i) {
       </div>
     </div>
   </article>`;
+}
+
+// The PDFs the browser found in the announcement's attachment list.
+function filesLine(a) {
+  if (!Array.isArray(a.attachments)) return "";
+  if (!a.attachments.length) return `<span class="files none">${icon("file", "width:14px;height:14px")}No attachments found</span>`;
+  const names = a.attachments.map((f) => f.name || "file").join(", ");
+  return `<span class="files" title="${esc(names)}">${icon("file", "width:14px;height:14px")}${a.attachments.length} PDF${a.attachments.length === 1 ? "" : "s"}: ${esc(names)}</span>`;
 }
 
 function renderCards() {
@@ -204,7 +213,7 @@ async function screen(ev) {
   try {
     const q = new URLSearchParams({ url: pageUrl(), company: $("#company").value.trim() });
     // A browser reads the SGX page like a person would; with SGX_AUTH_TOKEN set, try the direct API first.
-    const routes = state.health?.sgx_token ? ["/api/screen?op=screen", "/api/browse?op=screen"] : ["/api/browse?op=screen"];
+    const routes = state.health?.sgx_token ? ["/api/screen?op=screen&attachments=1", "/api/browse?op=screen&attachments=1"] : ["/api/browse?op=screen&attachments=1"];
     let res, err;
     for (const route of routes) {
       try { res = await api(`${route}&${q}`); break; } catch (e) { err = e; if (e.auth) break; }
@@ -501,7 +510,8 @@ $("#results").addEventListener("click", (e) => {
   if (i == null) return;
   const a = state.announcements[+i];
   if (b.dataset.view != null) return viewDone(a.url);
-  run({ announcement_url: a.url, issuer: a.issuer, stock_code: a.stock_code, title: a.title, broadcast: a.broadcast },
+  const pdf_urls = a.attachments?.length ? a.attachments.map((f) => f.url) : undefined;
+  run({ announcement_url: a.url, pdf_urls, issuer: a.issuer, stock_code: a.stock_code, title: a.title, broadcast: a.broadcast },
     b.dataset.scan != null ? "scan" : "extract");
 });
 

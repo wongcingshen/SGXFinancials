@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/index.py": { "maxDuration": 300, "excludeFiles": "node_modules/**" },
-    "api/browse.mjs": { "maxDuration": 120, "includeFiles": "node_modules/@sparticuz/chromium/bin/**" }
+    "api/browse.mjs": { "maxDuration": 300, "includeFiles": "node_modules/@sparticuz/chromium/bin/**" }
   },
   "rewrites": [
     { "source": "/api/((?!browse).*)", "destination": "/api/index" }

@@ -4,36 +4,49 @@ import assert from "node:assert/strict";
 import { attachments, launchBrowser, screen } from "../scraper/sgx.mjs";
 
 const TOKEN = "page-generated-token";
-const items = [1, 2, 3].map((i) => ({
-  title: `Financial Statements and Related Announcement::Half Yearly Results ${i}`,
-  issuer_name: ["DBS GROUP HOLDINGS LTD", "KEPPEL LTD.", "HIAP HOE LIMITED"][i - 1],
-  security_name: "", url: `https://links.sgx.com/1.0.0/corporate-announcements/ANN${i}/abc${i}`,
-  broadcast_date_time: Date.UTC(2026, 9, 30, 10, 2 + i), // 30 Oct 2026 18:0x SGT
-  category_name: "Financial Statements",
-}));
+const ROWS = [
+  ["30 Oct 2026", "11:11 PM", "MIYOSHI LIMITED", "MIYOSHI LIMITED", "Full Yearly Results", "M1"],
+  ["30 Oct 2026", "09:18 PM", "NO VA LAND INVESTMENT GROUP CORPORATION", "", "Third Quarter Results", "N1"],
+  ["30 Oct 2026", "07:39 PM", "BANK OF BARODA", "MULTIPLE", "Second Quarter and/ or Half Yearly Results", "B1"],
+];
+const annUrl = (id) => `https://links.sgx.com/1.0.0/corporate-announcements/${id}/abc`;
+const fullTitle = (t) => `Financial Statements and Related Announcement::${t}`;
 
-// Listing page that loads its data like sgx.com: a token-bearing call to api.sgx.com, 2 per page.
+// Listing laid out like sgx.com: Date & Time | Issuer Name | Security Name | Title | Category.
+function tablePage({ clickable }) {
+  const rows = ROWS.map(([d, t, issuer, sec, title, id]) => {
+    const cell = clickable
+      ? `<span class="link" onclick="window.open('${annUrl(id)}', '_blank')">${fullTitle(title)}</span>`
+      : `<a href="${annUrl(id)}" target="_blank">${fullTitle(title)}</a>`;
+    return `<tr><td>${d}<br>${t}</td><td>${issuer}</td><td>${sec}</td><td>${cell}</td><td><a href="#">Financial Statements</a></td></tr>`;
+  }).join("");
+  return `<!doctype html><title>Company Announcements</title><body><nav><a href="https://www.sgx.com/">Home</a></nav>
+    <sgx-table id="h"></sgx-table><script>
+    const root = document.getElementById("h").attachShadow({ mode: "open" });
+    setTimeout(() => { root.innerHTML = '<table><thead><tr><th>Date &amp; Time</th><th>Issuer Name</th><th>Security Name</th><th>Title</th><th>Category</th></tr></thead><tbody>${rows.replace(/'/g, "\\'")}</tbody></table>'; }, 600);
+    </script></body>`;
+}
+
+// Listing that loads its records like sgx.com: a token-bearing call to api.sgx.com, 2 per page.
+const items = ROWS.map(([, , issuer, , title, id], i) => ({
+  title: fullTitle(title), issuer_name: issuer, url: annUrl(id),
+  broadcast_date_time: Date.UTC(2026, 9, 30, 10, 2 + i), category_name: "Financial Statements",
+}));
 const apiPage = `<!doctype html><title>Company Announcements</title><body><div id="t"></div><script>
+fetch("https://api.sgx.com/announcements/v1.1/config", { headers: { authorizationtoken: "${TOKEN}" } });
 fetch("https://api.sgx.com/announcements/v1.1/?periodstart=20261029_160000&periodend=20261030_155959&cat=ANNC&sub=ANNC17&pagestart=0&pagesize=2",
   { headers: { authorizationtoken: "${TOKEN}" } }).then(r => r.json()).then(j => {
   document.getElementById("t").innerHTML = j.data.map(d => '<a href="' + d.url + '">' + d.title + '</a>').join("<br>");
 });</script></body>`;
 
-// Listing page with no API call to observe: rows rendered inside a shadow root.
-const domPage = `<!doctype html><title>Company Announcements</title><body><sgx-table id="h"></sgx-table><script>
-const root = document.getElementById("h").attachShadow({ mode: "open" });
-setTimeout(() => { root.innerHTML = '<table>' + [
-  ["30 Oct 2026 06:02 PM", "DBS GROUP HOLDINGS LTD", "Third Quarter Results", "ANNA"],
-  ["30 Oct 2026 07:05 AM", "UNITED OVERSEAS BANK LIMITED", "Third Quarter Results", "ANNB"],
-].map(([d, n, t, id]) => '<tr><td>' + d + '</td><td>' + n + '</td><td><a href="https://links.sgx.com/1.0.0/corporate-announcements/' + id + '/x">' + t + '</a></td></tr>').join("") + '</table>'; }, 600);
-</script></body>`;
-
-const annPage = `<!doctype html><html><body><h1>Half Yearly Results</h1>
-<h2>Attachments</h2>
-<a href="https://links.sgx.com/FileOpen/Results.ashx?App=Announcement&FileID=111">Results.pdf</a>
-<a href="https://links.sgx.com/FileOpen/Press.ashx?App=Announcement&FileID=112">Press Release.pdf</a>
-<a href="https://evil.example/x.pdf">elsewhere.pdf</a>
-<a href="https://www.sgx.com/">SGX</a></body></html>`;
+// Announcement page: the PDFs live in "announcement-attachment-list"; a decoy PDF sits outside it.
+const annPage = (id) => `<!doctype html><html><body><h1>Announcement ${id}</h1>
+<div class="announcement-attachment-list">
+  <a href="https://links.sgx.com/FileOpen/${id}_Results.ashx?App=Announcement&FileID=1">${id} Results.pdf</a>
+  <a href="https://links.sgx.com/FileOpen/${id}_Press.ashx?App=Announcement&FileID=2">${id} Press Release.pdf</a>
+</div>
+<aside><a href="https://links.sgx.com/FileOpen/Related.ashx?App=Announcement&FileID=9">Related.pdf</a></aside>
+<a href="https://evil.example/x.pdf">elsewhere.pdf</a></body></html>`;
 
 const cors = { "Access-Control-Allow-Origin": "https://www.sgx.com", "Access-Control-Allow-Headers": "authorizationtoken", "Access-Control-Allow-Methods": "GET" };
 let apiCalls = 0;
@@ -43,9 +56,10 @@ function site(listing) {
     page.on("request", (r) => {
       const u = new URL(r.url());
       if (u.hostname === "www.sgx.com") return r.respond({ status: 200, contentType: "text/html", body: listing });
-      if (u.hostname === "links.sgx.com") return r.respond({ status: 200, contentType: "text/html", body: annPage });
+      if (u.hostname === "links.sgx.com") return r.respond({ status: 200, contentType: "text/html", body: annPage(u.pathname.split("/")[3]) });
       if (u.hostname === "api.sgx.com") {
         if (r.method() === "OPTIONS") return r.respond({ status: 204, headers: cors });
+        if (u.pathname.endsWith("/config")) return r.respond({ status: 200, headers: cors, contentType: "application/json", body: '{"data":{"categories":[]}}' });
         apiCalls++;
         if (r.headers().authorizationtoken !== TOKEN) return r.respond({ status: 401, headers: cors, contentType: "application/json", body: "{}" });
         const p = Number(u.searchParams.get("pagestart"));
@@ -56,34 +70,54 @@ function site(listing) {
     });
   };
 }
+// New tabs opened by clicks need the same stand-in site.
+function serveNewTabs(browser) {
+  browser.on("targetcreated", async (t) => {
+    if (!t.opener()) return; // only tabs opened by clicking a title
+    const p = await t.page().catch(() => null);
+    if (p) await site("")(p).catch(() => {});
+  });
+}
 
+const URL_ = "https://www.sgx.com/stock-exchange/company-announcements?from=20261030&to=20261030&ANNC=ANNC17";
 const browser = await launchBrowser();
+serveNewTabs(browser);
 try {
-  const url = "https://www.sgx.com/stock-exchange/company-announcements?from=20261030&to=20261030&ANNC=ANNC17";
+  // Title links in the results table, every title opened for its attachments.
+  const t = await screen(browser, URL_, { preparePage: site(tablePage({ clickable: false })), attachments: true });
+  assert.equal(t.debug.source, "result table");
+  assert.deepEqual(t.announcements.map((a) => [a.broadcast, a.issuer, a.title]), [
+    ["2026-10-30 23:11", "MIYOSHI LIMITED", fullTitle("Full Yearly Results")],
+    ["2026-10-30 21:18", "NO VA LAND INVESTMENT GROUP CORPORATION", fullTitle("Third Quarter Results")],
+    ["2026-10-30 19:39", "BANK OF BARODA", fullTitle("Second Quarter and/ or Half Yearly Results")],
+  ]);
+  assert.deepEqual(t.announcements[0].attachments.map((f) => [f.name, f.from]),
+    [["M1 Results.pdf", "announcement-attachment-list"], ["M1 Press Release.pdf", "announcement-attachment-list"]]);
+  assert.ok(t.announcements.every((a) => a.attachments.length === 2), "only the files inside announcement-attachment-list");
+  console.log("ok title links + attachment lists:", t.announcements.map((a) => `${a.issuer} (${a.attachments.length} PDFs)`).join(" | "));
 
-  const a = await screen(browser, url, { preparePage: site(apiPage) });
+  // Titles that are click targets (open a new tab) rather than plain links.
+  const c = await screen(browser, URL_, { preparePage: site(tablePage({ clickable: true })) });
+  assert.equal(c.debug.clicked, 3);
+  assert.deepEqual(c.announcements.map((a) => a.url), ROWS.map((r) => annUrl(r[5])));
+  console.log("ok clicked every title:", c.announcements.length, "links");
+
+  // Records the page loads for itself (non-list responses ignored), paged with the page's token.
+  apiCalls = 0;
+  const a = await screen(browser, URL_, { preparePage: site(apiPage) });
   assert.equal(a.debug.source, "page data");
-  assert.equal(a.announcements.length, 3, "pages through all results with the page's token");
+  assert.equal(a.announcements.length, 3);
   assert.equal(apiCalls, 2);
-  assert.deepEqual(a.announcements[0], { title: items[0].title, issuer: "DBS GROUP HOLDINGS LTD", stock_code: "",
-    url: items[0].url, broadcast: "2026-10-30 18:03", category: "Financial Statements" });
-  console.log("ok page data + pagination:", a.announcements.map((x) => x.issuer).join(" | "));
+  assert.equal(a.announcements[0].broadcast, "2026-10-30 18:02");
+  console.log("ok page data + pagination, config response ignored");
 
-  const f = await screen(browser, url, { preparePage: site(apiPage), company: "keppel" });
-  assert.equal(f.announcements.length, 1);
+  const f = await screen(browser, URL_, { preparePage: site(apiPage), company: "baroda" });
+  assert.deepEqual(f.announcements.map((x) => x.issuer), ["BANK OF BARODA"]);
   console.log("ok company filter");
 
-  const d = await screen(browser, url, { preparePage: site(domPage) });
-  assert.equal(d.debug.source, "result table");
-  assert.deepEqual(d.announcements.map((x) => [x.issuer, x.broadcast, x.title]), [
-    ["DBS GROUP HOLDINGS LTD", "2026-10-30 18:02", "Third Quarter Results"],
-    ["UNITED OVERSEAS BANK LIMITED", "2026-10-30 07:05", "Third Quarter Results"],
-  ]);
-  console.log("ok result table (shadow DOM):", d.announcements.length, "rows");
-
-  const files = await attachments(browser, items[0].url, { preparePage: site(apiPage) });
-  assert.deepEqual(files.map((x) => x.name), ["Results.pdf", "Press Release.pdf"]);
-  console.log("ok attachments:", files.map((x) => x.url).join(" , "));
+  const files = await attachments(browser, annUrl("B1"), { preparePage: site("") });
+  assert.deepEqual(files.map((x) => x.name), ["B1 Results.pdf", "B1 Press Release.pdf"]);
+  console.log("ok single announcement:", files.length, "PDFs");
 } finally {
   await browser.close();
 }

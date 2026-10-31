@@ -101,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Screening {screen.page_url}")
     client = SGXClient()
     try:
-        anns = client.screen(screen, company=a.company)
+        anns = client.screen(screen, company=a.company, attachments=a.cmd == "run")
     except RuntimeError as e:
         print(f"ERROR: {e}")
         return 1

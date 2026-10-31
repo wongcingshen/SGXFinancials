@@ -99,10 +99,13 @@ def screen():
     if not url:
         return jsonify(error="url is required"), 400
     s = Screen.from_url(url)
-    anns = SGXClient().screen(s, company=request.args.get("company") or None)
-    return jsonify(page_url=s.page_url, count=len(anns), announcements=[
-        {"title": a.title, "issuer": a.issuer, "stock_code": a.stock_code,
-         "url": a.url, "broadcast": a.broadcast, "category": a.category} for a in anns])
+    client = SGXClient()
+    anns = client.screen(s, company=request.args.get("company") or None,
+                         attachments=request.args.get("attachments") == "1")
+    return jsonify(page_url=s.page_url, count=len(anns), debug=client.last_debug, announcements=[
+        {"title": a.title, "issuer": a.issuer, "stock_code": a.stock_code, "url": a.url,
+         "broadcast": a.broadcast, "category": a.category, "attachments": a.raw.get("attachments")}
+        for a in anns])
 
 
 @api("attachments", "GET")
