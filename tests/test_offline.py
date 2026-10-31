@@ -85,6 +85,30 @@ def test_gemini_schema_converts():
     assert "additionalProperties" not in json.dumps(sch)
 
 
+def test_gross_profit_from_expenses_by_nature():
+    by_nature = json.loads(json.dumps(FAKE))
+    by_nature["unit"] = "units"
+    by_nature["income_statement"]["rows"] = [
+        {"key": "revenue", "source_label": "Revenue", "values": [1_000_000, 900_000]},
+        {"key": "raw_materials", "source_label": "Raw materials, consumables used and changes in inventories", "values": [-400_000, -380_000]},
+        {"key": "employee_benefits", "source_label": "Employee benefits expenses", "values": [-200_000, None]},
+        {"key": "depreciation_amortisation", "source_label": "Depreciation and amortisation", "values": [50_000, 45_000]},
+    ]
+    norm = extractor.normalise(by_nature)
+    inc = norm["income_statement"]
+    assert inc["values"]["cost_of_sales"] == [-650, -425]  # '000; a missing part counts as nothing
+    assert inc["values"]["gross_profit"] == [350, 475]
+    assert inc["labels"]["cost_of_sales"].startswith("computed")
+    _, checks = workbook_bytes(None, norm, {"company_name": "X"})
+    gp = [c for c in checks if c["check"].startswith("Revenue + COGS")]
+    assert {c["status"] for c in gp} == {"derived"}
+
+    # A company that reports cost of sales keeps its own figures.
+    norm = extractor.normalise(FAKE)
+    assert norm["income_statement"]["values"]["cost_of_sales"] == [-80412, -72100]
+    assert not norm["income_statement"]["labels"]["cost_of_sales"].startswith("computed")
+
+
 def test_workbook_and_merge():
     meta = {"company_name": "ACME HOLDINGS LIMITED", "stock_code": "ACME", "currency": "SGD", "filing": "1H2026"}
     norm = extractor.normalise(FAKE)

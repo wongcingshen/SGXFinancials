@@ -177,7 +177,9 @@ def run_checks(records: list[dict]) -> list[dict]:
         for st, name, parts, total in CHECKS:
             if st != r["statement"]:
                 continue
-            if total not in v or parts[0] not in v or parts[1] not in v:
+            if str(r.get("labels", {}).get(total, "")).startswith("computed"):
+                status, diff = "derived", None  # the total was calculated from these parts
+            elif total not in v or parts[0] not in v or parts[1] not in v:
                 status, diff = "n/a", None
             else:
                 s = sum(v.get(p) or 0 for p in parts)
@@ -194,7 +196,7 @@ def _write_checks(ws, checks):
     for c in ws[1]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = HEAD_FILL
-    colours = {"PASS": "C6EFCE", "FAIL": "FFC7CE", "n/a": "EDEDED"}
+    colours = {"PASS": "C6EFCE", "FAIL": "FFC7CE", "n/a": "EDEDED", "derived": "FFF2CC"}
     for ch in checks:
         ws.append([ch["statement"], ch["period"], ch["check"], ch["status"], ch["difference"]])
         ws.cell(ws.max_row, 4).fill = PatternFill("solid", fgColor=colours[ch["status"]])

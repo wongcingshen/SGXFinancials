@@ -25,12 +25,14 @@ class Row:
 
 INCOME_STATEMENT = [
     Row("revenue", "Revenue", "total", "Revenue, turnover, sales, total income (banks: total income)"),
-    Row("cost_of_sales", "Cost of Goods Sold", "item", "Cost of sales, cost of revenue; negative number"),
-    Row("gross_profit", "Gross Profit", "total", "Gross profit / gross margin"),
+    Row("cost_of_sales", "Cost of Goods Sold", "item", "Cost of sales, cost of revenue; negative. Leave out when the statement has no such line"),
+    Row("raw_materials", "Raw Materials & Consumables Used", "item", "Expenses by nature: raw materials, consumables used and changes in inventories, as one figure; negative"),
+    Row("employee_benefits", "Employee Benefits Expenses", "item", "Expenses by nature: employee benefits expense / staff costs on the face of the statement; negative"),
+    Row("gross_profit", "Gross Profit", "total", "Gross profit as printed. Leave out when not printed"),
     Row("other_income", "Other Income", "item", "Other income, other operating income, other gains (net)"),
     Row("selling_expenses", "Distribution & Selling Expenses", "item", "Distribution, selling, marketing expenses; negative"),
     Row("admin_expenses", "Administrative Expenses", "item", "Administrative / general and administrative expenses; negative"),
-    Row("other_expenses", "Other Operating Expenses", "item", "Other operating expenses, other losses, impairment losses on financial assets; negative"),
+    Row("other_expenses", "Other Operating Expenses", "item", "Other operating expenses, other losses, impairment losses on financial assets (not the raw materials, employee benefits or D&A lines captured separately); negative"),
     Row("operating_profit", "Operating Profit", "total", "Operating profit / results from operating activities / EBIT, if reported"),
     Row("finance_income", "Finance Income", "item", "Finance income, interest income (non-bank)"),
     Row("finance_costs", "Finance Costs", "item", "Finance costs, finance expenses, interest expense (non-bank); negative"),
@@ -46,7 +48,7 @@ INCOME_STATEMENT = [
     Row("perpetual_holders", "Attributable to Perpetual Securities Holders", "item", "Attributable to perpetual securities / capital securities holders, if any"),
     Row("eps_basic", "EPS - Basic (cents)", "item", "Basic earnings per share; convert to cents if stated in dollars"),
     Row("eps_diluted", "EPS - Diluted (cents)", "item", "Diluted earnings per share; convert to cents if stated in dollars"),
-    Row("depreciation_amortisation", "Depreciation & Amortisation", "item", "Total depreciation + amortisation, from the statement or the cash flow statement adjustments; positive"),
+    Row("depreciation_amortisation", "Depreciation & Amortisation", "item", "Depreciation and amortisation: the income statement line(s) when shown, else the total from the cash flow statement adjustments; positive"),
 ]
 
 BALANCE_SHEET = [

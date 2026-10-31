@@ -36,6 +36,12 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    runs tie-out checks (assets = liabilities + equity, op + inv + fin = net change in cash, …)
    and **merges** new periods into an existing workbook so quarters/half-years/full years accumulate.
 
+**No cost of sales line?** Companies that present expenses by nature report no cost of sales or
+gross profit. The AI then extracts *Raw materials, consumables used and changes in inventories*,
+*Employee benefits expenses* and *Depreciation and amortisation*, and the program derives
+**Cost of Goods Sold** = the sum of those three and **Gross Profit** = Revenue − Cost of Goods Sold.
+Both are marked "computed" in the Source Map, and the gross-profit check shows "derived".
+
 The row layout lives in **`sgx_fin/template.py`**. Edit labels, order or add rows there to match
 your ShareInvestor view exactly; nothing else needs changing.
 

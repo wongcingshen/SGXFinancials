@@ -110,6 +110,7 @@ Rules:
 - Income statement and cash flow periods are durations (months = 3, 6, 9 or 12). Balance sheet periods are dates (months = 0).
 - Map each template key to the line the company reports. If a template line is a sum of several reported lines (e.g. "Reserves" = retained earnings + other reserves), add them and list the source labels joined with " + ". If a company line has no matching key, fold it into the closest "Other ..." key.
 - Only include a key if the filing gives the figure (or it is a direct sum of shown figures). Omit keys you cannot support; never invent numbers.
+- Expenses by nature: when the income statement has no cost of sales line and lists expenses by nature instead, fill raw_materials (raw materials, consumables used and changes in inventories), employee_benefits and depreciation_amortisation from the face of the statement, and leave cost_of_sales and gross_profit out unless they are printed. The program derives them.
 - Totals (gross profit, total assets, net cash from operating activities...) must be the printed totals, not your own arithmetic, when they are printed.
 - `page_numbers` are the page numbers within the attached excerpt (1-based) the statement came from.
 - Put caveats (restatements, unusual presentation, bank/REIT format) in `notes`.
@@ -328,6 +329,31 @@ def _gemini_result(resp, name: str) -> Extraction:
     return Extraction(json.loads(text), getattr(resp, "model_version", None) or name, usage)
 
 
+COGS_BY_NATURE = ("raw_materials", "employee_benefits", "depreciation_amortisation")
+
+
+def _derive_gross_profit(values: dict, labels: dict, n: int) -> None:
+    """No cost of sales line (expenses presented by nature): Cost of Goods Sold = raw materials,
+    consumables used and changes in inventories + employee benefits + depreciation & amortisation,
+    and Gross Profit = Revenue - Cost of Goods Sold."""
+    if any(v is not None for v in values.get("cost_of_sales", [])):
+        return
+    col = lambda k: values.get(k) or [None] * n  # noqa: E731
+    rm, eb, da = (col(k) for k in COGS_BY_NATURE)
+    cogs = [None if rm[i] is None and eb[i] is None
+            else round(-sum(abs(x) for x in (rm[i], eb[i], da[i]) if x is not None), 3)
+            for i in range(n)]
+    if all(c is None for c in cogs):
+        return
+    values["cost_of_sales"] = cogs
+    labels["cost_of_sales"] = ("computed (no cost of sales reported): raw materials, consumables used and "
+                               "changes in inventories + employee benefits + depreciation and amortisation")
+    if not any(v is not None for v in values.get("gross_profit", [])):
+        values["gross_profit"] = [None if r is None or c is None else round(r + c, 3)
+                                  for r, c in zip(col("revenue"), cogs)]
+        labels["gross_profit"] = "computed: revenue - derived cost of goods sold"
+
+
 def normalise(data: dict) -> dict:
     """Rescale to the template's output unit and key rows by template key.
 
@@ -345,6 +371,8 @@ def normalise(data: dict) -> dict:
                 vals = [None if v is None else round(v * factor, 3) for v in vals]
             values[row["key"]] = vals
             labels[row["key"]] = row["source_label"]
+        if st == "income_statement":
+            _derive_gross_profit(values, labels, n)
         if st == "cash_flow" and "cf_net_operating" in values:
             capex = values.get("cf_capex", [None] * n)
             values["free_cash_flow"] = [

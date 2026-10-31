@@ -504,7 +504,7 @@ function resultHtml(r) {
       <p class="block-title">Tie-out checks</p>
       <div class="check-sum"><span class="tag pass">${icon("check", "width:14px;height:14px")}${pass} pass</span>
         <span class="tag ${fail.length ? "fail" : "na"}">${icon(fail.length ? "alert" : "check", "width:14px;height:14px")}${fail.length} fail</span>
-        ${na ? `<span class="tag na">${na} not checkable</span>` : ""}</div>
+        ${na ? `<span class="tag na">${na} not checkable or derived</span>` : ""}</div>
       <details ${fail.length ? "open" : ""} style="margin-top:10px"><summary>${fail.length ? "Review the failed checks" : "Show every check"}</summary>
         <div class="check-list">${ordered.map((c) => `<div><span>${esc(c.check)}<br><span class="per">${esc(c.period)}${c.difference != null && c.status === "FAIL" ? ` · off by ${Number(c.difference).toLocaleString()}` : ""}</span></span>
           <span class="tag ${c.status === "PASS" ? "pass" : c.status === "FAIL" ? "fail" : "na"}">${c.status === "n/a" ? "n/a" : c.status.toLowerCase()}</span></div>`).join("")}</div>
