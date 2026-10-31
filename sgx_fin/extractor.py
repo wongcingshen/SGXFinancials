@@ -21,9 +21,10 @@ from pypdf import PdfReader, PdfWriter
 from . import template as T
 
 CLAUDE_DEFAULT = "claude-opus-5-5"
-# Tried in order until one exists for the key; set GEMINI_MODEL to pin one
-# (e.g. gemini-3.1-pro-preview for the hardest filings).
-GEMINI_MODELS = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-2.5-flash"]
+# Flash-Lite only: its free daily request allowance is far larger than Flash's. Tried in order
+# when a model is missing for the key or its quota is used up (each model has its own quota).
+# Set GEMINI_MODEL to pin one, e.g. gemini-3.1-pro-preview for the hardest filings.
+GEMINI_MODELS = ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-2.5-flash-lite"]
 UNIT_FACTORS = {"units": 1, "thousands": 1_000, "millions": 1_000_000, "billions": 1_000_000_000}
 
 
@@ -281,12 +282,16 @@ def _gemini(pdf_bytes: bytes, instruction: str, model: str, effort: str, client)
                 # Some models reject a thinking level: retry once with the model's default.
                 resp = client.models.generate_content(model=name, contents=contents, config=config(False))
         except errors.ClientError as e:
-            if e.code == 404 and name != candidates[-1]:
+            if e.code in (404, 429):
                 last_err = e
-                continue  # model not available for this key; try the next one
+                continue  # not available for this key, or its quota is used up: try the next one
             raise
         return _gemini_result(resp, name)
-    raise RuntimeError(f"No Gemini model available: {last_err}")
+    if getattr(last_err, "code", None) == 429:
+        raise RuntimeError(f"Gemini quota used up on {', '.join(candidates)}. "
+                           "Free-tier limits reset daily; try again later or set GEMINI_MODEL "
+                           f"to another model. ({last_err})")
+    raise RuntimeError(f"No Gemini model available for this key: {last_err}")
 
 
 def _gemini_result(resp, name: str) -> Extraction:
