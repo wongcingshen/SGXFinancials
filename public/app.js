@@ -477,7 +477,8 @@ function scanHtml(scan, pages) {
     const top = scan.candidates[s.key]?.[0];
     return `<div class="stmt ${s.cls}"><span class="ico">${icon(s.icon)}</span>
       <span class="nm">${s.name}<small>${sel.length ? `keyword score ${top ? Math.round(top.score) : "–"}` : "no page scored high enough"}</small></span>
-      <span class="chips">${sel.length ? sel.map((p) => `<span class="chip">p${p}</span>`).join("") : `<span class="chip missing">not found</span>`}</span></div>`;
+      <span class="chips">${sel.length ? sel.map((p) => `<span class="chip">p${p}</span>`).join("")
+        : scan.vision ? `<span class="chip">in the pictures</span>` : `<span class="chip missing">not found</span>`}</span></div>`;
   }).join("");
   const strip = scan.page_count <= 400
     ? `<div class="pm" aria-label="Page map">${Array.from({ length: scan.page_count }, (_, i) => {
@@ -494,7 +495,9 @@ function scanHtml(scan, pages) {
       <p class="muted" style="margin:10px 0 0;font-size:13px">${esc(scan.pdf)} · ${scan.page_count} pages${scan.attachments.length > 1 ? ` · the financial statements PDF of ${scan.attachments.length} attachments (${scan.downloaded.length} opened)` : ""}${
         pages?.length ? ` · ${pages.length} page${pages.length === 1 ? "" : "s"} go to ${esc(state.ai)}` : ""}</p>
     </div>
-    ${img.size ? `<div class="notice">${icon("alert")}<div>${img.size} page${img.size === 1 ? " has" : "s have"} no text layer (scanned images), so the keyword scan can’t read ${img.size === 1 ? "it" : "them"}. If a statement is missing, enter its pages below.</div></div>` : ""}`;
+    ${scan.vision
+      ? `<div class="notice info">${icon("eye")}<div>This filing’s statements are pictures (scanned or photographed), which a keyword scan can’t read. Its ${img.size} picture page${img.size === 1 ? "" : "s"} go to ${esc(state.ai)}, which finds the statements and reads them from the images.</div></div>`
+      : img.size ? `<div class="notice">${icon("alert")}<div>${img.size} page${img.size === 1 ? " is a picture" : "s are pictures"} with no readable text. If a statement is missing, enter its pages below.</div></div>` : ""}`;
 }
 
 function resultHtml(r) {
@@ -517,6 +520,8 @@ function resultHtml(r) {
           <span class="tag ${c.status === "PASS" ? "pass" : c.status === "FAIL" ? "fail" : "na"}">${c.status === "n/a" ? "n/a" : c.status.toLowerCase()}</span></div>`).join("")}</div>
       </details>
     </div>
+    ${r.meta.vision && r.meta.found_pages ? `<div class="kv">${STATEMENTS.map((s) => `<span>${s.name}: <b>${
+      (r.meta.found_pages[s.key] || []).map((p) => `p${p}`).join(", ") || "not found"}</b></span>`).join("")}</div>` : ""}
     ${r.meta.notes ? `<div class="notice info">${icon("sparkles")}<div><b>${esc(state.ai)}’s notes</b><br>${esc(r.meta.notes)}</div></div>` : ""}`;
 }
 

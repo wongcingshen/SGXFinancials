@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_c
 
 # Title phrases: strong evidence when they appear in the top part of a page.
 TITLES = {
@@ -87,7 +88,7 @@ class ScanResult:
     page_count: int
     pages: list[PageScore]
     selected: dict[str, list[int]]  # statement -> 1-based pages
-    image_only_pages: list[int]
+    image_only_pages: list[int]  # pictures with (almost) no text layer: scans and photos
 
     @property
     def all_selected(self) -> list[int]:
@@ -97,18 +98,49 @@ class ScanResult:
     def found_all(self) -> bool:
         return all(self.selected.get(k) for k in TITLES)
 
+    @property
+    def needs_vision(self) -> bool:
+        """The statements are probably pictures the keyword scan can't read.
+
+        True when there are picture pages and either a statement wasn't found in the text, or most
+        of the document is pictures (then the text "hits" are likely a cover or notes page).
+        """
+        if not self.image_only_pages:
+            return False
+        return not self.found_all or len(self.image_only_pages) >= max(3, 0.3 * self.page_count)
+
+    def vision_pages(self, cap: int = 60) -> list[int]:
+        """Pages for the AI to look through when the statements are pictures: every picture page
+        plus whatever the text scan found, in page order, at most `cap`."""
+        return sorted(set(self.all_selected) | set(self.image_only_pages))[:cap]
+
 
 def page_texts(pdf: Path) -> list[str]:
+    return [t for t, _ in read_pages(pdf)]
+
+
+def read_pages(pdf: Path) -> list[tuple[str, bool]]:
+    """(text layer, has a picture) for every page."""
     doc = pdfium.PdfDocument(str(pdf))
     try:
-        texts = []
+        out = []
         for i in range(len(doc)):
-            tp = doc[i].get_textpage()
-            texts.append(tp.get_text_range())
+            page = doc[i]
+            tp = page.get_textpage()
+            text = tp.get_text_range()
             tp.close()
-        return texts
+            try:
+                has_image = any(o.type == pdfium_c.FPDF_PAGEOBJ_IMAGE for o in page.get_objects(max_depth=2))
+            except Exception:
+                has_image = False
+            out.append((text, has_image))
+        return out
     finally:
         doc.close()
+
+
+# A page with a picture and fewer characters than this is treated as a scan / photo.
+PICTURE_PAGE_MAX_CHARS = 200
 
 
 def score_page(text: str, page_no: int) -> PageScore:
@@ -143,9 +175,10 @@ def score_page(text: str, page_no: int) -> PageScore:
 
 
 def scan_pdf(pdf: Path, min_score: float = 14.0, max_pages_per_statement: int = 3) -> ScanResult:
-    texts = page_texts(pdf)
-    pages = [score_page(t, i + 1) for i, t in enumerate(texts)]
-    image_only = [p.page for p in pages if not p.has_text]
+    read = read_pages(pdf)
+    pages = [score_page(t, i + 1) for i, (t, _) in enumerate(read)]
+    image_only = [i + 1 for i, (t, img) in enumerate(read)
+                  if not t.strip() or (img and len(t.strip()) < PICTURE_PAGE_MAX_CHARS)]
 
     selected: dict[str, list[int]] = {}
     for st in TITLES:

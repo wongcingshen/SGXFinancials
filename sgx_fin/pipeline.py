@@ -63,7 +63,9 @@ def pick_best_pdf(pdfs: list[Path], scans: dict | None = None) -> tuple[Path, Sc
         found = sum(bool(v) for v in res.selected.values())
         top = sum(max((p.scores[st] for p in res.pages), default=0) for st in res.selected)
         ns = name_score(pdf.name)
-        rank = (found > 0 and ns >= 0, found, ns, top)
+        # A results PDF whose statements are pictures counts as a candidate even though the
+        # keyword scan found nothing in it; presentations and releases never do.
+        rank = (ns >= 0 and (found > 0 or res.needs_vision), found, ns, top)
         if best is None or rank > best[0]:
             best = (rank, pdf, res)
     return (best[1], best[2]) if best else None
@@ -85,6 +87,8 @@ def choose_financial_pdf(client: SGXClient, links: list[tuple[str, str]], folder
         res = pick_best_pdf([pdf], scans)
         if res and res[1].found_all and name_score(name) >= 0 and name_score(pdf.name) >= 0:
             break  # the financial statements are here; leave the other attachments alone
+        if res and res[1].needs_vision and name_score(name) == 1:
+            break  # a results PDF whose statements are pictures
     best = pick_best_pdf(list(urls), scans)
     if not best:
         return None
@@ -96,11 +100,12 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
                 dry_run: bool = False, meta: dict | None = None,
                 cache_dir: Path | None = None) -> Result:
     scan = scan or scan_pdf(pdf)
-    pages = pages or scan.all_selected
+    pages = pages or default_pages(scan)
     result = Result(pdf, scan, pages, meta=dict(meta or {}))
     if dry_run or not pages:
         return result
-    ex = extractor.extract(pdf, pages, model=model, effort=effort, cache_dir=cache_dir)
+    vision = any(p in scan.image_only_pages for p in pages)
+    ex = extractor.extract(pdf, pages, model=model, effort=effort, cache_dir=cache_dir, vision=vision)
     result.normalised = extractor.normalise(ex.data)
     result.usage = ex.usage
     result.meta.update({
@@ -111,8 +116,19 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
         "source_pdf": pdf.name,
         "pages": ",".join(map(str, pages)),
         "model": ex.model,
+        "vision": vision,
+        # Where the AI says each statement was, as page numbers of the original PDF.
+        "found_pages": {st: sorted({pages[i - 1] for i in (ex.data.get(st) or {}).get("page_numbers", [])
+                                    if isinstance(i, int) and 1 <= i <= len(pages)})
+                        for st in ("income_statement", "balance_sheet", "cash_flow")},
     })
     return result
+
+
+def default_pages(scan: ScanResult) -> list[int]:
+    """The pages to send to the AI: the statements the keyword scan found or, when the statements
+    are pictures it can't read, the picture pages for the AI to look through."""
+    return scan.vision_pages() if scan.needs_vision else scan.all_selected
 
 
 def process_announcement(client: SGXClient, ann: Announcement, work_dir: Path, **kw) -> Result | None:

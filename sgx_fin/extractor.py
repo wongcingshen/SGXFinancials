@@ -175,27 +175,34 @@ def excerpt_pdf(pdf: Path, pages: list[int]) -> bytes:
     return buf.getvalue()
 
 
-def _instruction(pdf: Path, pages: list[int]) -> str:
+def _instruction(pdf: Path, pages: list[int], vision: bool = False) -> str:
+    if vision:
+        return (f"These {len(pages)} pages (original pages {pages} of {pdf.name}) include scanned or "
+                "photographed pages, so read them visually. They contain more than the statements: find the "
+                "income statement, balance sheet and cash flow statement among them (ignore commentary, "
+                "notes and other pages), give each statement's page_numbers, and fill the template. If a "
+                "picture is too unclear to read a figure with confidence, leave that figure out and say so in notes.")
     return (f"These {len(pages)} pages (original pages {pages} of {pdf.name}) were selected as the "
             "income statement, balance sheet and cash flow statement. Fill the template.")
 
 
 def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str = "high",
-            cache_dir: Path | None = None, client=None) -> Extraction:
+            cache_dir: Path | None = None, client=None, vision: bool = False) -> Extraction:
     """Send only `pages` of `pdf` to the configured provider and return the parsed JSON."""
     prov = provider()
     if prov is None:
         raise RuntimeError("No AI key configured: set GEMINI_API_KEY or ANTHROPIC_API_KEY")
     model = model or default_model(prov)
     pdf_bytes = excerpt_pdf(pdf, pages)
-    cache_key = hashlib.sha256(pdf_bytes + f"{prov}:{model}".encode() + SYSTEM.encode()).hexdigest()[:16]
+    cache_key = hashlib.sha256(pdf_bytes + f"{prov}:{model}:{vision}".encode() + SYSTEM.encode()).hexdigest()[:16]
     cache_file = (cache_dir or pdf.parent) / f"{pdf.stem}.{cache_key}.extract.json"
     if cache_file.exists():
         cached = json.loads(cache_file.read_text())
         return Extraction(cached["data"], cached["model"], cached.get("usage", {}))
 
-    run = _gemini if prov == "gemini" else _claude
-    ex = run(pdf_bytes, _instruction(pdf, pages), model, effort, client)
+    instruction = _instruction(pdf, pages, vision)
+    ex = (_gemini(pdf_bytes, instruction, model, effort, client, vision) if prov == "gemini"
+          else _claude(pdf_bytes, instruction, model, effort, client))
     cache_file.write_text(json.dumps({"data": ex.data, "model": ex.model, "usage": ex.usage}, indent=2))
     return ex
 
@@ -265,7 +272,7 @@ def gemini_schema(node):
     return out
 
 
-def _gemini(pdf_bytes: bytes, instruction: str, model: str, effort: str, client) -> Extraction:
+def _gemini(pdf_bytes: bytes, instruction: str, model: str, effort: str, client, vision: bool = False) -> Extraction:
     from google import genai
     from google.genai import errors, types
 
@@ -278,14 +285,16 @@ def _gemini(pdf_bytes: bytes, instruction: str, model: str, effort: str, client)
     schema = gemini_schema(SCHEMA)
     contents = [types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"), instruction]
 
-    def config(thinking: bool):
+    def config(extras: bool):
+        # extras: thinking level, and high resolution for scanned / photographed pages (small digits)
         return types.GenerateContentConfig(
             system_instruction=SYSTEM,
             response_mime_type="application/json",
             response_schema=schema,
             max_output_tokens=65536,
             thinking_config=types.ThinkingConfig(thinking_level=GEMINI_THINKING.get(effort, "MEDIUM"))
-            if thinking else None,
+            if extras and thinking else None,
+            media_resolution="MEDIA_RESOLUTION_HIGH" if extras and vision else None,
         )
 
     last_err: Exception | None = None
@@ -293,11 +302,11 @@ def _gemini(pdf_bytes: bytes, instruction: str, model: str, effort: str, client)
         thinking = not name.startswith("gemini-2")  # 2.x models use thinking budgets, not levels
         try:
             try:
-                resp = client.models.generate_content(model=name, contents=contents, config=config(thinking))
+                resp = client.models.generate_content(model=name, contents=contents, config=config(True))
             except errors.ClientError as e:
-                if e.code != 400 or not thinking:
+                if e.code != 400 or not (thinking or vision):
                     raise
-                # Some models reject a thinking level: retry once with the model's default.
+                # Some models reject a thinking level or resolution: retry once with their defaults.
                 resp = client.models.generate_content(model=name, contents=contents, config=config(False))
         except errors.ClientError as e:
             if e.code in (404, 429):

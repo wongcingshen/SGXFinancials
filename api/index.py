@@ -32,7 +32,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 from sgx_fin import extractor
 from sgx_fin.excel_writer import workbook_bytes
-from sgx_fin.pipeline import attachment_name, choose_financial_pdf, pick_best_pdf, process_pdf
+from sgx_fin.pipeline import attachment_name, choose_financial_pdf, default_pages, pick_best_pdf, process_pdf
 from sgx_fin.sgx_client import Announcement, SGXClient, Screen, is_sgx_url
 
 app = Flask(__name__, static_folder=None)
@@ -180,8 +180,9 @@ def process():
         "candidates": {st: sorted(({"page": p.page, "score": p.scores[st]} for p in scan.pages),
                                   key=lambda x: -x["score"])[:5] for st in scan.selected},
         "attachments": names, "downloaded": downloaded, "used_url": used_url,
+        "vision": scan.needs_vision,
     }
-    chosen = pages or scan.all_selected
+    chosen = pages or default_pages(scan)
     if dry_run or not chosen:
         return jsonify(scan=scan_info, pages=chosen, extracted=False,
                        message=None if chosen else "No statement pages found; pass pages manually.")

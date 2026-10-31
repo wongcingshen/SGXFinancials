@@ -161,7 +161,12 @@ NODE_PATH=$(npm root -g) node tests/make_sample_pdf.js   # regenerate the sample
 
 ## Limits
 
-- Scanned (image-only) PDFs have no text layer, so the keyword scan cannot locate pages; the scan
-  reports them and you can pass `--pages` / "Override pages" manually.
+- **Statements as pictures** (scanned or photographed pages): pages with a picture and almost no
+  text are detected without AI. When the statements are pictures, those pages (up to 60, plus any
+  the keyword scan found) go to the AI in the same single request, at high resolution, and it finds
+  the three statements among them and reads them from the images; the details panel shows the
+  pages it used. Very blurry photos can lose figures (they are left blank and mentioned in the
+  notes); `SGX_GEMINI_MODEL=gemini-3.1-pro-preview` reads difficult images better, and
+  "Wrong pages?" narrows a long scanned document to the right pages.
 - Banks, insurers and REITs use different statement formats; figures map to the closest lines and
   the AI notes the format in the **notes** field. Check the **Checks** sheet before relying on numbers.

@@ -145,6 +145,49 @@ def test_only_the_financial_statements_pdf_is_used():
     assert used.endswith("k=slides") and client.got == ["release", "slides"]
 
 
+def picture_pdf(src, dest):
+    """A copy of `src` whose pages are photos: rendered images with no text layer."""
+    import pypdfium2 as pdfium
+    doc = pdfium.PdfDocument(str(src))
+    imgs = [doc[i].render(scale=1.5).to_pil().convert("RGB") for i in range(len(doc))]
+    imgs[0].save(dest, save_all=True, append_images=imgs[1:], resolution=108)
+    return dest
+
+
+def test_picture_statements_go_to_the_ai_to_find():
+    import shutil
+    from sgx_fin.pipeline import choose_financial_pdf, default_pages
+
+    out = HERE / "out" / "pictures"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    pic = picture_pdf(HERE / "sample_results.pdf", out / "photos.pdf")
+    scan = scan_pdf(pic)
+    assert scan.image_only_pages == list(range(1, 9)) and scan.needs_vision
+    assert default_pages(scan) == list(range(1, 9))
+    assert not scan_pdf(HERE / "sample_results.pdf").needs_vision  # text PDFs are unchanged
+
+    class FakeClient:
+        def __init__(self): self.got = []
+        def download(self, url, folder):
+            kind = url.rsplit("=", 1)[1]
+            self.got.append(kind)
+            dest = folder / {"release": "Media Release.pdf", "results": "Half Yearly Results.pdf", "odd": "SESGXFINAL.pdf"}[kind]
+            shutil.copy(HERE / "sample_results.pdf" if kind == "release" else pic, dest)
+            return dest
+
+    links = [("https://links.sgx.com/FileOpen/a.ashx?k=release", "Media Release.pdf"),
+             ("https://links.sgx.com/FileOpen/b.ashx?k=results", "Half Yearly Results.pdf")]
+    client = FakeClient()
+    pdf, found, used, _ = choose_financial_pdf(client, links, out)
+    assert used.endswith("k=results") and found.needs_vision and client.got == ["results"]
+    # Unclear name (like SESGXFINAL): still beats a release whose text mentions the statements.
+    links = [("https://links.sgx.com/FileOpen/a.ashx?k=release", "Media Release.pdf"),
+             ("https://links.sgx.com/FileOpen/c.ashx?k=odd", "SESGXFINAL")]
+    _, _, used, _ = choose_financial_pdf(FakeClient(), links, out)
+    assert used.endswith("k=odd")
+
+
 def test_workbook_and_merge():
     meta = {"company_name": "ACME HOLDINGS LIMITED", "stock_code": "ACME", "currency": "SGD", "filing": "1H2026"}
     norm = extractor.normalise(FAKE)
