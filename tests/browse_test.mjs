@@ -1,7 +1,7 @@
 // Tests the browser scraper against a stand-in SGX site served through request interception.
 //   CHROME_PATH=/path/to/chrome node tests/browse_test.mjs
 import assert from "node:assert/strict";
-import { attachments, launchBrowser, screen } from "../scraper/sgx.mjs";
+import { attachments, launchBrowser, pageText, screen } from "../scraper/sgx.mjs";
 
 const TOKEN = "page-generated-token";
 const ROWS = [
@@ -126,6 +126,10 @@ try {
   const f = await screen(browser, URL_, { preparePage: site(apiPage), company: "baroda" });
   assert.deepEqual(f.announcements.map((x) => x.issuer), ["BANK OF BARODA"]);
   console.log("ok company filter");
+
+  const text = await pageText(browser, annUrl("B1"), { preparePage: site(""), waitMs: 1500 });
+  assert.ok(text.includes("Announcement B1") && text.includes("Results.pdf"));
+  console.log("ok page text read through the browser");
 
   const files = await attachments(browser, annUrl("B1"), { preparePage: site("") });
   assert.deepEqual(files.map((x) => x.name), ["B1 Results.pdf", "B1 Press Release.pdf"]);

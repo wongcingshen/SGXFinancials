@@ -147,23 +147,48 @@ def parse_format():
 
 @api("release_date", "GET")
 def release_date():
-    """Date, period and timing from a notice of the results release date (no AI)."""
-    from sgx_fin.notices import parse_release_notice
+    """Date, period and timing of a results release notice (no AI): from the announcement page's
+    own text when it states the date there, else from the notice PDF."""
+    from sgx_fin.notices import page_text, parse_release_notice
     from sgx_fin.page_scanner import page_texts
     url = request.args.get("url", "")
     pdf_url = request.args.get("pdf_url", "")
     if not is_sgx_url(url) or (pdf_url and not is_sgx_url(pdf_url)):
         return jsonify(error="Provide https://*.sgx.com links"), 400
     client = SGXClient()
+    page_read = False
+    if not pdf_url and "/fileopen/" not in url.lower():
+        try:
+            r = client.session.get(url, timeout=client.timeout)
+            r.raise_for_status()
+            page_read = True
+            info = parse_release_notice(page_text(r.text))
+            if info["release_date"]:
+                return jsonify(url=url, source="announcement page", **info)
+        except Exception:  # refused or unreachable: the browser can read it (op=release_text)
+            pass
     ann = Announcement("", "", "", url, "", "", {})
-    links = [pdf_url] if pdf_url else client.attachments(ann)
+    try:
+        links = [pdf_url] if pdf_url else client.attachments(ann)
+    except Exception:
+        links = []
     folder = WORK / ann.slug
     for link in links[:3]:
-        pdf = client.download(link, folder)
+        try:
+            pdf = client.download(link, folder)
+        except Exception:
+            continue
         if pdf:
             info = parse_release_notice(" ".join(page_texts(pdf)[:2]))
-            return jsonify(url=url, pdf_url=link, **info)
-    return jsonify(error="No PDF in the notice", need_browser=not links), 404
+            return jsonify(url=url, pdf_url=link, source="notice PDF", **info)
+    return jsonify(error="No release date found", need_browser=not page_read), 404
+
+
+@api("release_text", "POST")
+def release_text():
+    """The same, from page text the browser read (when links.sgx.com refuses a direct request)."""
+    from sgx_fin.notices import parse_release_notice
+    return jsonify(source="announcement page", **parse_release_notice(request.form.get("text", "")[:200_000]))
 
 
 @api("attachments", "GET")

@@ -380,3 +380,22 @@ export async function attachments(browser, annUrl, opts = {}) {
     await page.close().catch(() => {});
   }
 }
+
+/** The readable text of an announcement page (some notices state their date there). */
+export async function pageText(browser, url, opts = {}) {
+  if (!isSgxUrl(url)) throw new Error("Only https://*.sgx.com pages can be opened");
+  const page = await newPage(browser);
+  try {
+    if (opts.preparePage) await opts.preparePage(page);
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    let text = "";
+    for (let waited = 0; waited < (opts.waitMs ?? 8_000); waited += 500) {
+      text = await page.evaluate(() => document.body?.innerText || "").catch(() => "");
+      if (text.trim().length > 200) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    return text;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}

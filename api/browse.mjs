@@ -2,8 +2,9 @@
 //   GET /api/browse?op=screen&url=<SGX announcements page URL>&company=&attachments=1
 //       attachments=1 also opens every Title link and lists its announcement-attachment-list PDFs
 //   GET /api/browse?op=attachments&url=<links.sgx.com announcement URL>
+//   GET /api/browse?op=text&url=<announcement URL>   the page's readable text
 import { timingSafeEqual } from "node:crypto";
-import { attachments, launchBrowser, screen } from "../scraper/sgx.mjs";
+import { attachments, launchBrowser, pageText, screen } from "../scraper/sgx.mjs";
 
 function authorised(req) {
   const pw = process.env.APP_PASSWORD;
@@ -23,6 +24,9 @@ export default async function handler(req, res) {
   let browser;
   try {
     browser = await launchBrowser();
+    if (op === "text") {
+      return res.status(200).json({ url, text: (await pageText(browser, url)).slice(0, 200_000) });
+    }
     if (op === "attachments") {
       return res.status(200).json({ url, files: await attachments(browser, url) });
     }

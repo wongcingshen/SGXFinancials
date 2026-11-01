@@ -428,6 +428,17 @@ def test_release_date_notices_and_separate_statements():
     assert scan_pdf(HERE / "sample_results.pdf").basis == "consolidated"
     assert scan_pdf(HERE / "separate_results.pdf").basis == "separate"
 
+    # Notices that state the date on the announcement page itself (no PDF).
+    page = ("<html><script>var d='on 1 Jan 2020'</script><table><tr><td>Announcement Title</td><td>Notification of "
+            "Results Release</td></tr><tr><td>Date &amp; Time of Broadcast</td><td>30-Oct-2026 17:48:12</td></tr><tr>"
+            "<td>Description</td><td>The Company will be releasing its unaudited financial results for the third quarter "
+            "ended 30 September 2026 on 12 November 2026 (Thursday) after market close.</td></tr></table></html>")
+    from sgx_fin.notices import page_text
+    got = parse_release_notice(page_text(page))
+    assert got["release_date"] == "2026-11-12" and got["period_end"] == "2026-09-30" and got["timing"] == "after market close"
+    assert parse_release_notice("Date of Results Announcement: 13/11/2026")["release_date"] == "2026-11-13"
+    assert parse_release_notice("will announce its results on Friday, 13-Nov-2026")["release_date"] == "2026-11-13"
+
     # The API reads a notice's date without AI.
     spec = importlib.util.spec_from_file_location("vapp", HERE.parent / "api" / "index.py")
     app = importlib.util.module_from_spec(spec)
@@ -435,11 +446,23 @@ def test_release_date_notices_and_separate_statements():
     real = SGXClient.attachments, SGXClient.download
     SGXClient.attachments = lambda self, ann: ["https://links.sgx.com/FileOpen/notice.ashx?App=Announcement&FileID=1"]
     SGXClient.download = lambda self, url, folder: HERE / "notice.pdf"
+    class Page:  # the announcement page: no date in its text, so the PDF is read
+        status_code, text, url = 200, "<html><body>Notification of Results Release. Please see attached.</body></html>", ""
+        def raise_for_status(self): pass
+    real_get = __import__("requests").Session.get
+    __import__("requests").Session.get = lambda self, url, **kw: Page()
     try:
-        r = app.app.test_client().get("/api/release_date?op=release_date&url=https://links.sgx.com/1.0.0/corporate-announcements/K/1")
+        client = app.app.test_client()
+        r = client.get("/api/release_date?op=release_date&url=https://links.sgx.com/1.0.0/corporate-announcements/K/1")
+        Page.text = page  # now the page states the date: no PDF needed
+        r2 = client.get("/api/release_date?op=release_date&url=https://links.sgx.com/1.0.0/corporate-announcements/K/2")
+        r3 = client.post("/api/release_text?op=release_text", data={"text": page_text(page)})
     finally:
         SGXClient.attachments, SGXClient.download = real
-    assert r.status_code == 200 and r.json["release_date"] == "2026-11-13"
+        __import__("requests").Session.get = real_get
+    assert r.status_code == 200 and r.json["release_date"] == "2026-11-13" and r.json["source"] == "notice PDF"
+    assert r2.json["release_date"] == "2026-11-12" and r2.json["source"] == "announcement page"
+    assert r3.json["release_date"] == "2026-11-12"
 
 
 def test_workbook_and_merge():

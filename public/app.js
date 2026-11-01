@@ -258,7 +258,17 @@ async function loadReleaseDates() {
       const a = queue.shift();
       try {
         a.release = await api(`/api/release_date?op=release_date&url=${encodeURIComponent(a.url)}`, { timeoutMs: 60_000 });
-      } catch { a.release = { failed: true }; }
+      } catch (e) {
+        a.release = { failed: true };
+        if (e.body?.need_browser) {  // links.sgx.com refused a direct read: let the browser read the page
+          try {
+            const { text } = await api(`/api/browse?op=text&url=${encodeURIComponent(a.url)}`, { timeoutMs: 90_000 });
+            const fd = new FormData();
+            fd.append("text", text || "");
+            a.release = await api("/api/release_text?op=release_text", { method: "POST", body: fd, timeoutMs: 30_000 });
+          } catch { /* keep "date not found" */ }
+        }
+      }
       renderReleases();
     }
   };
