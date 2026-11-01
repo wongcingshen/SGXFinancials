@@ -61,5 +61,8 @@ const html = [
 (async () => {
   const b = await chromium.launch(); const p = await b.newPage();
   await p.setContent(html); await p.pdf({ path: path.join(__dirname, 'sample_results.pdf'), format: 'A4' });
+  // The same statements filed as the parent company's alone ("separate"), for the duplicate-filing tests.
+  await p.setContent(html.replace(/consolidated/gi, 'separate').replace('B. Condensed interim statements of financial position', 'B. Condensed interim separate statement of financial position'));
+  await p.pdf({ path: path.join(__dirname, 'separate_results.pdf'), format: 'A4' });
   await b.close();
 })();

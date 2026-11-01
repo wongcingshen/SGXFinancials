@@ -100,6 +100,7 @@ class ScanResult:
     pages: list[PageScore]
     selected: dict[str, list[int]]  # statement -> 1-based pages
     image_only_pages: list[int]  # pictures with (almost) no text layer: scans and photos
+    basis: str = "unknown"  # consolidated | separate | unknown, from the statement headings
 
     @property
     def all_selected(self) -> list[int]:
@@ -256,7 +257,31 @@ def scan_pdf(pdf: Path, min_score: float = 14.0, max_pages_per_statement: int = 
                 break
         selected[st] = chosen
 
-    return ScanResult(pdf, len(pages), pages, selected, image_only)
+    result = ScanResult(pdf, len(pages), pages, selected, image_only)
+    result.basis = statement_basis([read[p - 1][0] for p in (result.all_selected or range(1, min(len(read), 6) + 1))])
+    return result
+
+
+# Whether statements are the group's (consolidated) or the parent company's alone (separate /
+# standalone). Some issuers file each set as its own announcement; only the consolidated one is used.
+CONSOLIDATED = re.compile(r"\bconsolidated\b|\bhợp nhất\b|\bhop nhat\b", re.I)
+SEPARATE = re.compile(r"\bseparate (?:financial )?statements?\b|\bseparate (?:statement|balance)|\bstandalone\b|"
+                      r"\bstand-alone\b|\bcompany[- ]only\b|\bparent company\b|\briêng\b", re.I)
+
+
+def statement_basis(texts: list[str]) -> str:
+    """'consolidated', 'separate' or 'unknown', judged from the top of the statement pages."""
+    cons = sep = 0
+    for text in texts:
+        lines = [l for l in text.splitlines() if l.strip()]
+        top = "\n".join(lines[: max(8, len(lines) // 5)])
+        cons += len(CONSOLIDATED.findall(top))
+        sep += len(SEPARATE.findall(top))
+    if cons > sep:
+        return "consolidated"
+    if sep > cons:
+        return "separate"
+    return "unknown"
 
 
 def format_report(res: ScanResult, top_n: int = 5) -> str:

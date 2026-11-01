@@ -7,6 +7,7 @@ Then open http://127.0.0.1:5000
 """
 
 import argparse
+import re
 import importlib.util
 import shutil
 import sys
@@ -47,7 +48,19 @@ def install_mocks():
         ("KSH", "KSH HOLDINGS LIMITED", "17:48", "Financial Statements and Related Announcement::Notification of Results Release"),
         # titled as results, but the PDF is a notice: caught by the content check before any AI call
         ("NTC", "NOTICE CO LTD", "08:00", "Financial Statements and Related Announcement::Half Yearly Results"),
+        # the same quarter filed twice: consolidated and separate (company-only) statements
+        ("NVA", "NO VA LAND INVESTMENT GROUP CORPORATION", "21:18", "Financial Statements and Related Announcement::Third Quarter Results"),
+        ("NVB", "NO VA LAND INVESTMENT GROUP CORPORATION", "21:16", "Financial Statements and Related Announcement::Third Quarter Results"),
+        # a pair whose file names don't say which is which: the statement headings decide
+        ("ABA", "ABC HOLDINGS LTD", "20:00", "Financial Statements and Related Announcement::Full Yearly Results"),
+        ("ABB", "ABC HOLDINGS LTD", "20:01", "Financial Statements and Related Announcement::Full Yearly Results"),
     ]
+    named = {
+        "NVA": ["20261030_NVLG_CONSOLIDATED_FS_2026Q3.pdf", "20261030_NVLG_EXPLANATION_CONSOL_FS_2026Q3.pdf"],
+        "NVB": ["20261030_NVLG_SEPARATE_FS_2026Q3.pdf", "20261030_NVLG_EXPLANATION_SEP_FS_2026Q3.pdf"],
+        "ABA": ["ABC FY2026 Results A.pdf"], "ABB": ["ABC FY2026 Results B.pdf"],
+    }
+    separate = ROOT / "tests" / "separate_results.pdf"
     notice = ROOT / "tests" / "notice.pdf"
 
     def screen(self, s, company=None, attachments=False):
@@ -56,9 +69,9 @@ def install_mocks():
         def files(c):
             if not attachments:
                 return None
-            names = [f"{c} Results.pdf"] if c != "D05" else [  # one filing with several attachments
+            names = named.get(c) or ([f"{c} Results.pdf"] if c != "D05" else [  # one filing with several attachments
                 "20261029 - Media Release.pdf", "20261029 Financial Results Presentation.pdf",
-                "20261029 - Half Yearly Results.pdf", "29/10/2026 18:24:53"]
+                "20261029 - Half Yearly Results.pdf", "29/10/2026 18:24:53"])
             return [{"name": n, "url": f"https://links.sgx.com/FileOpen/{c}_{i}.ashx?App=Announcement&FileID={i}",
                      "from": "announcement-attachment-list"} for i, n in enumerate(names)]
         anns = [Announcement(t, n, c, f"https://links.sgx.com/1.0.0/corporate-announcements/MOCK{c}", f"{day} {h}", "ANNC17",
@@ -74,8 +87,9 @@ def install_mocks():
     def download(self, url, dest_dir):
         time.sleep(0.6)
         dest_dir.mkdir(parents=True, exist_ok=True)
-        out = dest_dir / (url.split("/FileOpen/")[-1].split(".ashx")[0] + ".pdf")
-        shutil.copy(notice if ("KSH_" in url or "NTC_" in url) else sample, out)
+        out = dest_dir / (re.sub(r"[^A-Za-z0-9_.-]+", "_", url.split("/FileOpen/")[-1].split(".ashx")[0])[-60:] + ".pdf")
+        src = notice if ("KSH" in url or "NTC" in url) else separate if ("NVB" in url or "ABB" in url) else sample
+        shutil.copy(src, out)
         return out
 
     def extract(pdf, pages, **kw):

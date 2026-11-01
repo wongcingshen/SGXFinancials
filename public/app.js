@@ -198,10 +198,13 @@ function cardHtml(a, i) {
   const status = j.status === "done"
     ? `<span class="card-note ${fail ? "bad" : ""}">${pass} checks pass${fail ? `, ${fail} fail` : ""}${saved}</span>`
     : j.status === "failed" ? `<span class="card-note bad" title="${esc(j.error)}">${esc(j.error)}</span>`
-    : j.status === "skipped" ? `<span class="card-note muted" title="${esc(j.error)}">${esc(j.error)}</span>` : "";
+    : j.status === "skipped" ? `<span class="card-note muted" title="${esc(j.error)}">${esc(j.error)}</span>`
+    : a.reason ? `<span class="card-note muted" title="${esc(a.reason)}">${esc(a.reason)}</span>` : "";
   const hasDetails = j.scan || j.result || j.error;
   const name = esc(nameCase(a.issuer) || a.fileName || "Unknown issuer");
-  return `<article class="card ${j.status} ${a.kind === "other" ? "other" : ""}" data-card="${i}" data-accent="${accentFor(a.stock_code || a.issuer)}" style="animation-delay:${Math.min(i, 12) * 30}ms">
+  // Cards fade in once, when a screen's results first appear; later redraws don't replay it.
+  const motion = state.animate ? `animation-delay:${Math.min(i, 12) * 30}ms` : "animation:none";
+  return `<article class="card ${j.status} ${a.kind === "other" ? "other" : ""}" data-card="${i}" data-accent="${accentFor(a.stock_code || a.issuer)}" style="${motion}">
     <div class="band">
       <svg class="route" viewBox="0 0 260 104" preserveAspectRatio="none" aria-hidden="true"><path d="M20 84 C70 70 90 40 140 46 S210 20 250 14" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 7"/></svg>
       <span class="pill">${pill}</span>
@@ -217,12 +220,74 @@ function cardHtml(a, i) {
   </article>`;
 }
 
+// Some issuers file the same results twice: the consolidated (group) statements and the separate
+// (parent-company-only) ones. File names usually say which; otherwise the keyword scan's reading of
+// the statement headings decides during extraction. Only the consolidated filing is extracted.
+const CONSOL_NAME = /consolidat|consol[^a-z]|(^|[^a-z])group([^a-z]|$)|hop[\s_-]?nhat|hợp nhất/i;
+const SEPARATE_NAME = /separate|(^|[^a-z])sep([^a-z]|$)|standalone|stand[\s_-]alone|company[\s_-]only|parent[\s_-]company|rieng|riêng/i;
+function basisFromNames(a) {
+  const text = [shortTitle(a.title), ...(a.attachments || []).map((f) => f.name || "")].join(" ");
+  const c = CONSOL_NAME.test(text), s = SEPARATE_NAME.test(text);
+  return c && !s ? "consolidated" : s && !c ? "separate" : "unknown";
+}
+const dupKey = (a) => [nameCase(a.issuer).toLowerCase(), shortTitle(a.title).toLowerCase(), String(a.broadcast || "").slice(0, 10)].join("|");
+const SEPARATE_NOTE = "Separate (company-only) statements: the consolidated filing is extracted instead.";
+
+function markDuplicates(items) {
+  const groups = new Map();
+  for (const a of items.filter((x) => x.kind === "results")) {
+    const k = dupKey(a);
+    groups.set(k, [...(groups.get(k) || []), a]);
+  }
+  for (const [k, group] of groups) {
+    if (group.length < 2) continue;
+    const consolidated = group.filter((a) => basisFromNames(a) === "consolidated");
+    if (consolidated.length) {
+      for (const a of group) if (!consolidated.includes(a)) Object.assign(a, { kind: "other", reason: SEPARATE_NOTE });
+    } else {
+      for (const a of group) a.dupGroup = k; // decided by the statement headings when extracted
+    }
+  }
+}
+
+// Notices of the results release date: read the date, period and timing from each (no AI).
+async function loadReleaseDates() {
+  const queue = state.items.filter((a) => a.kind === "release_date" && !a.release);
+  const worker = async () => {
+    while (queue.length) {
+      const a = queue.shift();
+      try {
+        a.release = await api(`/api/release_date?op=release_date&url=${encodeURIComponent(a.url)}`, { timeoutMs: 60_000 });
+      } catch { a.release = { failed: true }; }
+      renderReleases();
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+}
+
+function renderReleases() {
+  const el = $("#releases");
+  if (!el) return;
+  const list = state.items.filter((a) => a.kind === "release_date")
+    .sort((x, y) => (x.release?.release_date || "9999").localeCompare(y.release?.release_date || "9999"));
+  const day = (iso) => iso ? new Date(iso + "T00:00:00").toLocaleDateString("en-SG", { weekday: "short", day: "numeric", month: "short", year: "numeric" }) : "";
+  el.innerHTML = list.map((a) => {
+    const r = a.release;
+    const when = !r ? `<span class="spin" aria-hidden="true"></span>reading…` : r.release_date ? `<b>${esc(day(r.release_date))}</b>` : `<span class="muted">date not found</span>`;
+    return `<div class="rel-row"><span class="rel-when">${when}${r?.timing ? `<small>${esc(r.timing)}</small>` : ""}</span>
+      <span class="rel-co"><b>${esc(nameCase(a.issuer))}</b><small>${esc(r?.period || shortTitle(a.title))}</small></span>
+      <a class="rel-link" href="${esc(r?.pdf_url || a.url)}" target="_blank" rel="noopener">${icon("file", "width:15px;height:15px")}Notice</a></div>`;
+  }).join("");
+}
+
 function renderCards() {
   const list = state.items;
-  const nResults = list.filter((a) => a.kind !== "other").length;
-  const nOther = list.length - nResults;
+  const nResults = list.filter((a) => a.kind === "results").length;
+  const nRelease = list.filter((a) => a.kind === "release_date").length;
+  const nOther = list.length - nResults - nRelease;
   if (state.range !== undefined)
-    $("#annNote").textContent = `${nResults} results filing${nResults === 1 ? "" : "s"}${nOther ? ` · ${nOther} other` : ""} · ${state.range}`;
+    $("#annNote").textContent = [`${nResults} results filing${nResults === 1 ? "" : "s"}`,
+      nRelease && `${nRelease} release date${nRelease === 1 ? "" : "s"}`, nOther && `${nOther} other`, state.range].filter(Boolean).join(" · ");
   if (!list.length) {
     const d = state.debug || {};
     const saw = d.source ? `<p style="font-size:12.5px">What the browser saw: “${esc(d.title || "untitled page")}”, ${d.counts ? `${d.counts.table} rows in the table, ${d.counts.page_data} in the page data` : `${d.dom_links ?? 0} links`}.${
@@ -230,16 +295,20 @@ function renderCards() {
     $("#results").innerHTML = `<div class="intro"><div><h3 style="margin-top:0">No financial results for these dates</h3>
       <p>SGX lists nothing under Financial Statements for these dates${$("#company").value.trim() ? " and this company" : ""}. Try a wider range.</p>${saw}</div></div>`;
   } else {
-    const results = list.map((a, i) => [a, i]).filter(([a]) => a.kind !== "other");
+    const results = list.map((a, i) => [a, i]).filter(([a]) => a.kind === "results");
+    const releases = list.filter((a) => a.kind === "release_date");
     const others = list.map((a, i) => [a, i]).filter(([a]) => a.kind === "other");
     $("#results").innerHTML = (results.length
       ? `<div class="grid">${results.map(([a, i]) => cardHtml(a, i)).join("")}</div>`
-      : `<p class="muted" style="margin:0">No results filings for these dates, only the notices below.</p>`)
+      : `<p class="muted" style="margin:0">No results filings for these dates.</p>`)
+      + (releases.length ? `<section class="releases"><h3>${icon("calendar", "width:18px;height:18px")}Results release dates</h3>
+          <p class="muted">Companies announcing when their results will come out.</p><div id="releases"></div></section>` : "")
       + (others.length ? `<details class="others" ${state.othersOpen ? "open" : ""}><summary>${icon("file", "width:15px;height:15px")}
-          ${others.length} other announcement${others.length === 1 ? "" : "s"} in this category: notices of results dates, releases, presentations.
+          ${others.length} other announcement${others.length === 1 ? "" : "s"} in this category: releases, presentations, updates and duplicate filings.
           Not extracted unless you choose to.</summary>
           <div class="grid">${others.map(([a, i]) => cardHtml(a, i)).join("")}</div></details>` : "");
     $("#results .others")?.addEventListener("toggle", (e) => { state.othersOpen = e.target.open; });
+    renderReleases();
   }
   renderBulk();
 }
@@ -248,7 +317,7 @@ function renderCard(item) {
   const i = state.items.indexOf(item);
   const el = $(`#results [data-card="${i}"]`);
   if (!el) return renderCards();
-  el.outerHTML = cardHtml(item, i).replace(/animation-delay:[^"]*/, "animation:none");
+  el.outerHTML = cardHtml(item, i);
   renderBulk();
   if ($("#runSheet").open && $("#runSheet").dataset.key === item.key) showDetails(item);
 }
@@ -264,11 +333,11 @@ function renderBulk() {
   const el = $("#bulk");
   const items = state.items;
   const done = items.filter((a) => a.job.status === "done");
-  const todo = items.filter((a) => a.kind !== "other" && (a.job.status === "idle" || a.job.status === "failed"));
+  const todo = items.filter((a) => a.kind === "results" && (a.job.status === "idle" || a.job.status === "failed"));
   const working = items.filter((a) => a.job.status in BUSY).length;
   let html = "";
   if (state.bulk) {
-    html = `<span class="bulk-note">${done.length} of ${items.filter((x) => x.kind !== "other").length} done</span>
+    html = `<span class="bulk-note">${done.length} of ${items.filter((x) => x.kind === "results" || x.job.status === "done").length} done</span>
       <button type="button" class="btn btn-outline" id="bulkStop" ${state.bulk.stop ? "disabled" : ""}>${state.bulk.stop ? "Stopping…" : "Stop"}</button>`;
   } else {
     if (done.length > 1 || (done.length && !todo.length && !working))
@@ -302,11 +371,15 @@ async function screen(ev) {
     }
     if (!res) throw err;
     state.items = res.announcements.map((a) => ({ ...a, kind: a.kind || "results", key: a.url, job: { status: "idle" } }));
+    markDuplicates(state.items);
+    state.animate = true;
     state.debug = res.debug || null;
     const m = res.page_url.match(/from=(\d{8}).*?to=(\d{8})/);
     const fmt = (s) => nice(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6)}`);
     state.range = m ? (m[1] === m[2] ? fmt(m[1]) : `${fmt(m[1])} – ${fmt(m[2])}`) : "";
     renderCards();
+    state.animate = false;
+    loadReleaseDates();
   } catch (e) {
     $("#results").innerHTML = `<div class="notice error">${icon("alert")}<div><b>Couldn’t screen SGX.</b> ${esc(e.message)}</div></div>`;
     if (e.auth) openSheet("#settingsSheet");
@@ -401,6 +474,7 @@ function formData(a, dryRun, pages, workbook, files) {
 /** Download → keyword scan → AI → workbook for one card. Progress is shown on the card. */
 async function extract(a, { pages } = {}) {
   const j = a.job;
+  if (j.status === "skipped" && !pages) return; // a duplicate settled while it waited in the queue
   Object.assign(j, { status: "reading", error: "", scan: null, result: null, since: Date.now(), started: Date.now() });
   renderCard(a);
   try {
@@ -416,6 +490,22 @@ async function extract(a, { pages } = {}) {
       scanRes = await api("/api/process?op=process", { method: "POST", body: formData(a, true, pages || a.pages) });
     }
     j.scan = scanRes;
+    if (a.dupGroup && !pages) {
+      const twins = state.items.filter((x) => x !== a && x.dupGroup === a.dupGroup);
+      if (scanRes.scan.basis === "separate" && twins.length) {
+        Object.assign(j, { status: "skipped", error: SEPARATE_NOTE });
+        Object.assign(a, { kind: "other", reason: SEPARATE_NOTE });
+        renderCards();
+        return;
+      }
+      if (scanRes.scan.basis === "consolidated") {
+        for (const t of twins) if (["idle", "queued"].includes(t.job.status)) {
+          Object.assign(t.job, { status: "skipped", error: SEPARATE_NOTE });
+          Object.assign(t, { kind: "other", reason: SEPARATE_NOTE });
+        }
+        renderCards();
+      }
+    }
     if (!scanRes.pages.length) throw new Error("The keyword scan found no statement pages. Open the details to choose pages.");
     j.ai = scanRes.scan.vision && state.health?.photo_model ? "GLM" : state.ai; // picture filings go to GLM first
     j.status = "ai";
@@ -453,7 +543,7 @@ async function extract(a, { pages } = {}) {
 
 async function extractAll() {
   if (state.bulk) return;
-  const queue = state.items.filter((a) => a.kind !== "other" && (a.job.status === "idle" || a.job.status === "failed"));
+  const queue = state.items.filter((a) => a.kind === "results" && (a.job.status === "idle" || a.job.status === "failed"));
   if (!queue.length) return;
   state.bulk = { stop: false };
   for (const a of queue) a.job.status = "queued";

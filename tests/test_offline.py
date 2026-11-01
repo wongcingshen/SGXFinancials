@@ -382,8 +382,9 @@ def test_notices_and_releases_are_not_extracted():
     fs = "Financial Statements and Related Announcement::"
     assert classify_title(fs + "Half Yearly Results") == "results"
     assert classify_title(fs + "Full Yearly Results - Amendment") == "results"
-    for t in (fs + "Notification of Results Release", fs + "Third Quarter Business Update", fs + "Response to SGX Queries",
-              "DATE OF RELEASE OF FINANCIAL RESULTS FOR FIRST HALF OF FY2027", "Results Presentation 1H FY2027"):
+    for t in (fs + "Notification of Results Release", "DATE OF RELEASE OF FINANCIAL RESULTS FOR FIRST HALF OF FY2027"):
+        assert classify_title(t) == "release_date", t
+    for t in (fs + "Third Quarter Business Update", fs + "Response to SGX Queries", "Results Presentation 1H FY2027"):
         assert classify_title(t) == "other", t
 
     notice = HERE / "notice.pdf"
@@ -408,6 +409,37 @@ def test_notices_and_releases_are_not_extracted():
     finally:
         extractor.extract = real
     assert r.status_code == 422 and r.json["not_results"] and not called
+
+
+def test_release_date_notices_and_separate_statements():
+    import importlib.util
+    from sgx_fin.notices import parse_release_notice
+    from sgx_fin.page_scanner import page_texts
+    from sgx_fin.sgx_client import SGXClient
+
+    info = parse_release_notice(" ".join(page_texts(HERE / "notice.pdf")))
+    assert info == {"release_date": "2026-11-13", "period": "first half of FY2027 ended 30 September 2026",
+                    "period_end": "2026-09-30", "timing": "after the close of trading on the Singapore Exchange"}
+    other = parse_release_notice("the unaudited results of the Group for the third quarter ended 30 September 2026 "
+                                 "will be released on Thursday, 12 November 2026, before the market opens.")
+    assert other["release_date"] == "2026-11-12" and other["period_end"] == "2026-09-30"
+
+    # Consolidated vs separate (company-only) statements, from the statement headings.
+    assert scan_pdf(HERE / "sample_results.pdf").basis == "consolidated"
+    assert scan_pdf(HERE / "separate_results.pdf").basis == "separate"
+
+    # The API reads a notice's date without AI.
+    spec = importlib.util.spec_from_file_location("vapp", HERE.parent / "api" / "index.py")
+    app = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(app)
+    real = SGXClient.attachments, SGXClient.download
+    SGXClient.attachments = lambda self, ann: ["https://links.sgx.com/FileOpen/notice.ashx?App=Announcement&FileID=1"]
+    SGXClient.download = lambda self, url, folder: HERE / "notice.pdf"
+    try:
+        r = app.app.test_client().get("/api/release_date?op=release_date&url=https://links.sgx.com/1.0.0/corporate-announcements/K/1")
+    finally:
+        SGXClient.attachments, SGXClient.download = real
+    assert r.status_code == 200 and r.json["release_date"] == "2026-11-13"
 
 
 def test_workbook_and_merge():

@@ -145,6 +145,27 @@ def parse_format():
     return jsonify(format=fmt, marked=F.to_marked(fmt), problems=T.formula_problems(T.check_format(fmt)))
 
 
+@api("release_date", "GET")
+def release_date():
+    """Date, period and timing from a notice of the results release date (no AI)."""
+    from sgx_fin.notices import parse_release_notice
+    from sgx_fin.page_scanner import page_texts
+    url = request.args.get("url", "")
+    pdf_url = request.args.get("pdf_url", "")
+    if not is_sgx_url(url) or (pdf_url and not is_sgx_url(pdf_url)):
+        return jsonify(error="Provide https://*.sgx.com links"), 400
+    client = SGXClient()
+    ann = Announcement("", "", "", url, "", "", {})
+    links = [pdf_url] if pdf_url else client.attachments(ann)
+    folder = WORK / ann.slug
+    for link in links[:3]:
+        pdf = client.download(link, folder)
+        if pdf:
+            info = parse_release_notice(" ".join(page_texts(pdf)[:2]))
+            return jsonify(url=url, pdf_url=link, **info)
+    return jsonify(error="No PDF in the notice", need_browser=not links), 404
+
+
 @api("attachments", "GET")
 def attachment_links():
     # On Vercel /api/browse is the Node browser function; this covers local runs of this app.
@@ -220,6 +241,7 @@ def process():
                                   key=lambda x: -x["score"])[:5] for st in scan.selected},
         "attachments": names, "downloaded": downloaded, "used_url": used_url,
         "vision": scan.needs_vision,
+        "basis": scan.basis,  # consolidated | separate | unknown
         "ai_locate": scan.needs_ai_locate,  # keywords missing: the AI finds the statements
         "missing": scan.missing,
     }

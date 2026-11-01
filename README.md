@@ -27,7 +27,14 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    of the results date ("Notification of Results Release"), press and media releases,
    presentations, business updates and replies to queries. These are recognised by title and
    listed separately ("not extracted unless you choose to"), so screening doesn't spend time on
-   them and **Extract all** skips them. A filing whose PDF turns out to hold no statements (no
+   them and **Extract all** skips them.
+   **Results release dates** get their own list: each notice's one-page PDF is read with
+   patterns (no AI) for the release date, the period and the timing ("Fri 13 Nov 2026, after the
+   close of trading — first half of FY2027 ended 30 September 2026").
+   **Duplicate filings** (the same company, results type and day, e.g. consolidated and separate
+   statements filed as two announcements): attachment names decide ("CONSOLIDATED" / "Group" /
+   "hợp nhất" over "SEPARATE" / "Standalone" / "riêng"); when they don't, the statement headings
+   do during extraction, before any AI call. Only the consolidated filing is extracted. A filing whose PDF turns out to hold no statements (no
    statement titles, no number tables, or notice wording such as "intends to release its
    financial results") is marked "Not a results filing" before any AI call.
 3. **Pick the financial statements PDF** (no AI): attachments are tried by name, results /

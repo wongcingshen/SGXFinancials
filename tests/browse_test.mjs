@@ -93,7 +93,7 @@ try {
   const t = await screen(browser, URL_, { preparePage: site(tablePage({ clickable: false })), attachments: true });
   assert.equal(t.debug.source, "result table");
   const notice = t.announcements.find((a) => a.issuer.startsWith("KSH"));
-  assert.equal(notice.kind, "other");
+  assert.equal(notice.kind, "release_date");
   assert.equal(notice.attachments, undefined, "a notice is listed from its title only");
   assert.ok(!opened.has("K1") && ["M1", "N1", "B1"].every((id) => opened.has(id)), [...opened]);
   console.log("ok notice listed, not opened; results opened:", [...opened].join(","));
