@@ -55,9 +55,32 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
 5. **AI extraction** (`sgx_fin/extractor.py`): only the selected pages are cut into a small PDF
    and sent to the AI with a strict JSON schema built from the template, so
    every number lands on a known line. Group (consolidated) figures only, with the company's own label kept for audit.
-6. **Excel** (`sgx_fin/excel_writer.py`): rescales to `'000`, writes the sheets in the chosen format,
-   runs tie-out checks (assets = liabilities + equity, op + inv + fin = net change in cash, …)
-   and **merges** new periods into an existing workbook so quarters/half-years/full years accumulate.
+   Statements that are **pictures** take their own route first (see below).
+6. **Check and correct** (`sgx_fin/checks.py`): parts must add up to their printed totals (PBT +
+   tax = PAT, interest income + interest expense = net interest income, assets = liabilities +
+   equity, cash at the beginning + net change = cash at the end, …). A figure whose sign was read
+   backwards is flipped where that, and only that, makes a failing check add up. Any check still
+   failing sends the pages back to the AI once with the failing lines pointed out; the second
+   reading's figures are taken only where they make the totals add up.
+7. **Excel** (`sgx_fin/excel_writer.py`): rescales to `'000`, writes the sheets in the chosen format,
+   reports the tie-out checks and **merges** new periods into an existing workbook so
+   quarters/half-years/full years accumulate.
+
+**Statements as pictures** (`sgx_fin/pictures.py`). Scanned and photographed filings go wrong
+in different ways, so each step deals with one of them:
+
+| Problem | Step |
+|---|---|
+| No text layer at all, or a scan whose hidden OCR layer gets digits wrong | **Triage** (no AI): pages that are pictures, and scans with an invisible OCR layer, are told apart from text pages with a background picture. OCR layers still help the keyword scan, but the figures are read from the picture |
+| Many pages, few of them statements; standalone and consolidated sets | **Locate**: small previews of every picture page (one cheap Flash-Lite request) give each statement page, its heading and basis. Consolidated pages are used, with their unlabelled continuation pages |
+| Pages turned sideways or upside down, tilted scans, dim or shadowed photos, wide margins | **Prepare** (no AI): each page is rendered at the scan's own resolution, turned upright (the previews' answer, checked against the direction the ink lines run), straightened (projection profile), cropped to the content, contrast-stretched and lightly sharpened |
+| Figures slipping to the row or column next door in dense, many-column tables | **Copy as printed**: the statement pages alone, at the finest image resolution, are copied as text tables (every row and column, with each column's period) by Gemini Flash (`SGX_VISION_MODEL` to change; Flash-Lite if Flash's quota is used up; GLM 5.3 Flash if Gemini fails). Reading is kept apart from interpreting |
+| Misread digits (a 6 for an 8) | **Verify** (no AI): what the tables say about themselves: totals named in labels ("Total Income (1 + 2)", "(7-8-9)", "(a)+(b)+(c)+(d)", "(A)+(B)+(C)"), Total / Sub total / net cash lines against the lines above them, quarter + quarter = half year (6M + 3M = 9M…) on every line, and the cash roll-forward |
+| | **Re-read**: rows that fail are read again from enlarged top and bottom halves of their page; a new reading is taken only where it makes the failing relation hold |
+| Mapping printed lines to the template | **Fill the template** from the checked tables as text, the same way as a text filing, then the checks above |
+
+The workbook gets a **Transcription** sheet with the tables as read: corrected figures in green
+(first reading in the cell comment), rows that still don't add up in yellow to check against the PDF.
 
 **Statement formats.** The rows, their order, subtotals and formulas come from a *format*, chosen
 per filing by the AI from each format's "used for" description. Built-in formats live in
@@ -83,8 +106,13 @@ Commission Income, Other Non-Interest Income, Operating Expenses, Operating Prof
 Allowances, Allowances, then PBT to EPS; and a balance sheet of Cash & Central Bank Balances,
 Due from Banks, Investments, Loans & Advances, Deposits, Due to Banks, Borrowings and equity.
 The AI classifies each filing as `bank` or `general`; consolidated statements are preferred over
-standalone ones. Totals a bank doesn't print (net interest income, equity, total liabilities)
-are derived and marked "computed".
+standalone ones. Totals a bank doesn't print (net interest income, total operating income,
+operating expenses, equity, total liabilities) are derived and marked "computed". Indian bank
+layouts are handled: their "Total Income" (interest earned + other income, before interest
+expended) is never taken as total operating income; Profit After Tax is the profit after tax before
+minority interest, with a share of associates added after tax in its own line; the bottom line
+"Net Profit for the period (12-13+14+15)" is the profit attributable to shareholders; exceptional
+items deducted in "(7-8-9)" are charges.
 
 **All figures are in '000** of the reporting currency (EPS in cents / paise). The AI reports the
 unit printed (units, thousands, lakhs, millions, crores, billions) and the program rescales; a
@@ -139,7 +167,8 @@ python tests/dev_server.py --mock      # demo data; drop --mock for the real thi
    | `APP_PASSWORD` | strongly recommended | Anyone with the URL could otherwise spend your API credits |
    | `SGX_AUTH_TOKEN` | no | Optional shortcut, see *SGX token* below |
    | `SGX_GEMINI_MODEL` | no | Pin a model. Default is Flash-Lite (largest free daily allowance): latest `gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`, then `gemini-flash-lite-latest` if one is unavailable or out of quota. Each filing uses one request. Try `gemini-3.1-pro-preview` for hard filings |
-   | `GLM_FLASH` | no | Key for **GLM 5.3 Flash**, used first for filings whose statements are pictures (Gemini takes over if it fails). An `nvapi-` key uses NVIDIA's free API catalog (the model id is looked up from the key's model list; pin it with `GLM_MODEL`); other keys use Z.ai. `GLM_MAX_IMAGES` (default 8) caps pictures per request |
+   | `SGX_VISION_MODEL` | no | The Gemini model that copies tables from pictures. Default `gemini-3.5-flash`, falling back to Flash-Lite when its quota is used up. Picture filings are few and need 2–3 requests each; set `gemini-3.5-flash-lite` to keep everything on Flash-Lite |
+   | `GLM_FLASH` | no | Key for **GLM 5.3 Flash**, the fallback for filings whose statements are pictures when Gemini fails. An `nvapi-` key uses NVIDIA's free API catalog (the model id is looked up from the key's model list; pin it with `GLM_MODEL`); other keys use Z.ai. `GLM_MAX_IMAGES` (default 8) caps pictures per request |
    | `ANTHROPIC_API_KEY` / `CLAUDE_MODEL` | no | Use Claude (`claude-opus-5-5`) instead; with both keys set, `AI_PROVIDER=gemini\|anthropic` picks |
 
 3. Deploy. Open the site, enter the password, pick a date and click **Screen**, then
@@ -204,25 +233,23 @@ SGX's terms of use apply to the data you retrieve; keep request volumes modest.
 | Income Statement / Balance Sheet / Cash Flow | The format's rows, one column per period (grouped by length, latest first), `'000` of reporting currency, EPS in cents |
 | Checks | Arithmetic tie-outs per period: PASS / FAIL / n/a |
 | Source Map | For every figure: the company's own line label, filing, PDF, pages and model |
+| Transcription | Picture filings only: the tables as read from the pictures, corrections in green, doubtful rows in yellow |
 
 ## Tests
 
 ```bash
-python tests/test_offline.py               # scanner, URL mapping, schema, Excel merge
+python tests/test_offline.py               # scanner, pictures, checks, schema, Excel merge
 CHROME_PATH=/path/to/chrome node tests/browse_test.mjs   # browser scraper vs a stand-in SGX site
 NODE_PATH=$(npm root -g) node tests/make_sample_pdf.cjs   # regenerate the sample PDF (needs playwright)
 ```
 
 ## Limits
 
-- **Statements as pictures** (scanned or photographed pages): pages with a picture and almost no
-  text are detected without AI. When the statements are pictures, those pages (up to 60, plus any
-  the keyword scan found) go to the AI in the same single request, at high resolution, and it finds
-  the three statements among them and reads them from the images; the details panel shows the
-  pages it used. With `GLM_FLASH` set, these filings go to GLM 5.3 Flash first: pages are sent as
-  images, and a filing with more picture pages than `GLM_MAX_IMAGES` is first skimmed at low
-  resolution to find the statements, then only those pages are read. Very blurry photos can lose figures (they are left blank and mentioned in the
-  notes); `SGX_GEMINI_MODEL=gemini-3.1-pro-preview` reads difficult images better, and
-  "Wrong pages?" narrows a long scanned document to the right pages.
+- **Statements as pictures**: a figure that is unreadable stays blank ("?"), and a misread that
+  happens to keep every total adding up can't be caught by the checks; rows that still don't add
+  up after the re-read are marked yellow on the Transcription sheet. Handwriting is not
+  supported. A picture filing takes 3–5 AI requests (locate, copy, re-read when needed, fill,
+  re-check when needed) and about 1–3 minutes. "Wrong pages?" lets you name the statement pages
+  of a long scanned document yourself.
 - Banks, insurers and REITs use different statement formats; figures map to the closest lines and
   the AI notes the format in the **notes** field. Check the **Checks** sheet before relying on numbers.

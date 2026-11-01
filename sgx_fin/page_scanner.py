@@ -101,6 +101,13 @@ class ScanResult:
     selected: dict[str, list[int]]  # statement -> 1-based pages
     image_only_pages: list[int]  # pictures with (almost) no text layer: scans and photos
     basis: str = "unknown"  # consolidated | separate | unknown, from the statement headings
+    # Scans that carry a hidden OCR text layer: the keywords can be read, the figures are read from
+    # the picture (OCR layers often get digits wrong).
+    scanned_pages: list[int] = field(default_factory=list)
+
+    @property
+    def picture_pages(self) -> list[int]:
+        return sorted({*self.image_only_pages, *self.scanned_pages})
 
     @property
     def all_selected(self) -> list[int]:
@@ -160,11 +167,40 @@ class ScanResult:
 
 
 def page_texts(pdf: Path) -> list[str]:
-    return [t for t, _ in read_pages(pdf)]
+    return [r[0] for r in read_pages(pdf)]
 
 
-def read_pages(pdf: Path) -> list[tuple[str, bool]]:
-    """(text layer, has a picture) for every page."""
+def _layers(page) -> tuple[bool, bool]:
+    """(has a picture, is a scan whose text is a hidden OCR layer).
+
+    A scan: one picture covering most of the page, with the text either invisible (render mode 3,
+    how OCR tools write it) or drawn underneath the picture. A text page on a full-page background
+    picture draws its text visibly on top, so it doesn't count."""
+    w, h = page.get_size()
+    has_image, cover, texts, hidden, under = False, 0.0, 0, 0, 0
+    for o in page.get_objects(max_depth=2):
+        if o.type == pdfium_c.FPDF_PAGEOBJ_IMAGE:
+            has_image = True
+            try:
+                left, bottom, right, top = (o.get_bounds() if hasattr(o, "get_bounds") else o.get_pos())
+                area = max(0.0, min(right, w) - max(left, 0)) * max(0.0, min(top, h) - max(bottom, 0)) / (w * h or 1)
+            except Exception:
+                area = 0.0
+            if area >= 0.6:
+                under, cover = under + texts, max(cover, area)  # text drawn before a full-page picture is hidden by it
+        elif o.type == pdfium_c.FPDF_PAGEOBJ_TEXT:
+            texts += 1
+            try:
+                if pdfium_c.FPDFTextObj_GetTextRenderMode(o.raw) == pdfium_c.FPDF_TEXTRENDERMODE_INVISIBLE:
+                    hidden += 1
+            except Exception:
+                pass
+    scan = cover >= 0.6 and texts > 0 and (hidden + under) >= 0.6 * texts
+    return has_image, scan
+
+
+def read_pages(pdf: Path) -> list[tuple[str, bool, bool]]:
+    """(text layer, has a picture, is a scan with a hidden OCR layer) for every page."""
     doc = pdfium.PdfDocument(str(pdf))
     try:
         out = []
@@ -174,10 +210,10 @@ def read_pages(pdf: Path) -> list[tuple[str, bool]]:
             text = tp.get_text_range()
             tp.close()
             try:
-                has_image = any(o.type == pdfium_c.FPDF_PAGEOBJ_IMAGE for o in page.get_objects(max_depth=2))
+                has_image, scan = _layers(page)
             except Exception:
-                has_image = False
-            out.append((text, has_image))
+                has_image, scan = False, False
+            out.append((text, has_image, scan))
         return out
     finally:
         doc.close()
@@ -224,9 +260,10 @@ def score_page(text: str, page_no: int) -> PageScore:
 
 def scan_pdf(pdf: Path, min_score: float = 14.0, max_pages_per_statement: int = 3) -> ScanResult:
     read = read_pages(pdf)
-    pages = [score_page(t, i + 1) for i, (t, _) in enumerate(read)]
-    image_only = [i + 1 for i, (t, img) in enumerate(read)
+    pages = [score_page(t, i + 1) for i, (t, _, _) in enumerate(read)]
+    image_only = [i + 1 for i, (t, img, _) in enumerate(read)
                   if not t.strip() or (img and len(t.strip()) < PICTURE_PAGE_MAX_CHARS)]
+    scanned = [i + 1 for i, (t, _, scan) in enumerate(read) if scan and i + 1 not in image_only]
 
     selected: dict[str, list[int]] = {}
     for st in TITLES:
@@ -257,7 +294,7 @@ def scan_pdf(pdf: Path, min_score: float = 14.0, max_pages_per_statement: int = 
                 break
         selected[st] = chosen
 
-    result = ScanResult(pdf, len(pages), pages, selected, image_only)
+    result = ScanResult(pdf, len(pages), pages, selected, image_only, scanned_pages=scanned)
     result.basis = statement_basis([read[p - 1][0] for p in (result.all_selected or range(1, min(len(read), 6) + 1))])
     return result
 
@@ -288,6 +325,8 @@ def format_report(res: ScanResult, top_n: int = 5) -> str:
     out = [f"{res.pdf.name}: {res.page_count} pages"]
     if res.image_only_pages:
         out.append(f"  pages with no text layer (scanned images): {res.image_only_pages}")
+    if res.scanned_pages:
+        out.append(f"  scans with a hidden OCR text layer: {res.scanned_pages}")
     for st in TITLES:
         ranked = sorted(res.pages, key=lambda p: p.scores[st], reverse=True)[:top_n]
         cand = ", ".join(f"p{p.page}={p.scores[st]}" for p in ranked)

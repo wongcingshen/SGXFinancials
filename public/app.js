@@ -120,7 +120,7 @@ async function loadHealth() {
     $("#serverInfo").innerHTML = `${icon("info")}<div><b>Server</b><br>
       Model: <span class="mono">${esc(h.model || "—")}</span><br>
       AI: ${h.ai_key ? `${esc(state.ai)} (key configured)` : `<b>no key</b> — add GEMINI_API_KEY to this Vercel project (${esc(h.deployment || "")}), then redeploy`}<br>
-      Photo filings: ${h.photo_model ? `${esc(h.photo_model)}, then ${esc(state.ai)}` : `${esc(state.ai)} (set GLM_FLASH to use GLM 5.3 Flash)`}<br>
+      Photo filings: ${(h.vision_models || []).length ? (h.vision_models || []).map(esc).join(", then ") : "no AI for pictures"}${h.photo_model ? "" : " (set GLM_FLASH to add GLM 5.3 Flash as a fallback)"}<br>
       AI variables visible: ${esc((h.ai_vars || []).join(", ") || "none")}<br>
       App password: ${h.password_required ? "required" : "not set (anyone with the link can run extractions)"}<br>
       SGX token: ${h.sgx_token ? "configured" : "not set (only needed if SGX refuses requests)"}</div>`;
@@ -517,7 +517,7 @@ async function extract(a, { pages } = {}) {
       }
     }
     if (!scanRes.pages.length) throw new Error("The keyword scan found no statement pages. Open the details to choose pages.");
-    j.ai = scanRes.scan.vision && state.health?.photo_model ? "GLM" : state.ai; // picture filings go to GLM first
+    j.ai = state.ai;
     j.status = "ai";
     j.since = Date.now();
     renderCard(a);
@@ -526,7 +526,9 @@ async function extract(a, { pages } = {}) {
     const existing = state.folderOk && name && !state.mergeFile ? await readFromFolder(name) : null;
     // Only the PDF the scan chose: the server needn't download the other attachments again.
     const chosen = scanRes.scan.used_url && a.attachments?.filter((f) => f.url === scanRes.scan.used_url);
-    const res = await api("/api/process?op=process", { method: "POST", body: formData(a, false, scanRes.pages.join(","), existing, chosen?.length ? chosen : null) });
+    // Pages go along only when chosen by hand: otherwise the server picks them (and, for pictures,
+    // narrows them down to the statement pages itself).
+    const res = await api("/api/process?op=process", { method: "POST", body: formData(a, false, pages || a.pages || "", existing, chosen?.length ? chosen : null) });
     if (state.mergeFile) clearMerge();
     const blob = new Blob([Uint8Array.from(atob(res.workbook_b64), (c) => c.charCodeAt(0))],
       { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -615,6 +617,7 @@ function scanHtml(scan, pages) {
   const owner = {};
   for (const s of STATEMENTS) for (const p of scan.selected[s.key] || []) owner[p] = s.cls;
   const img = new Set(scan.image_only_pages);
+  const ocr = scan.scanned_pages || [];
   const rows = STATEMENTS.map((s) => {
     const sel = scan.selected[s.key] || [];
     const top = scan.candidates[s.key]?.[0];
@@ -643,8 +646,8 @@ function scanHtml(scan, pages) {
         scan.missing.map((k) => STATEMENTS.find((x) => x.key === k).name.toLowerCase()).join(", ")}, so ${pages?.length || "the"} page${pages?.length === 1 ? "" : "s"} (${
         pages?.length === scan.page_count ? "the whole document" : "what was found plus the most number-heavy pages"}) go to ${esc(state.ai)}, which finds the three statements itself.</div></div>` : ""}
     ${scan.vision
-      ? `<div class="notice info">${icon("eye")}<div>This filing’s statements are pictures (scanned or photographed), which a keyword scan can’t read. Its ${img.size} picture page${img.size === 1 ? "" : "s"} go to ${esc(state.health?.photo_model || state.ai)}${
-        state.health?.photo_model ? ` (${esc(state.ai)} if that fails)` : ""}, which finds the statements and reads them from the images.</div></div>`
+      ? `<div class="notice info">${icon("eye")}<div>This filing’s statements are pictures (scanned or photographed), which a keyword scan can’t read. Small previews of its ${img.size} picture page${img.size === 1 ? "" : "s"} find the statement pages (consolidated first); those are turned upright, straightened and cleaned up, copied exactly as printed, checked against their own totals, and any rows that don’t add up are read again enlarged, before the template is filled.</div></div>`
+      : ocr.length ? `<div class="notice info">${icon("eye")}<div>${ocr.length} page${ocr.length === 1 ? " is a scan" : "s are scans"} with a hidden text layer: the keywords came from that layer, but the figures are read from the pictures, which are checked against their own totals.</div></div>`
       : img.size ? `<div class="notice">${icon("alert")}<div>${img.size} page${img.size === 1 ? " is a picture" : "s are pictures"} with no readable text. If a statement is missing, enter its pages below.</div></div>` : ""}`;
 }
 
@@ -669,9 +672,23 @@ function resultHtml(r) {
           <span class="tag ${c.status === "PASS" ? "pass" : c.status === "FAIL" ? "fail" : "na"}">${c.status === "n/a" ? "n/a" : c.status.toLowerCase()}</span></div>`).join("")}</div>
       </details>
     </div>
+    ${r.meta.pictures ? picturesHtml(r.meta.pictures) : ""}
     ${(r.meta.vision || r.meta.located_by_ai) && r.meta.found_pages ? `<div class="kv">${STATEMENTS.map((s) => `<span>${s.name}: <b>${
       (r.meta.found_pages[s.key] || []).map((p) => `p${p}`).join(", ") || "not found"}</b></span>`).join("")}</div>` : ""}
     ${r.meta.notes ? `<div class="notice info">${icon("sparkles")}<div><b>${esc(state.ai)}’s notes</b><br>${esc(r.meta.notes)}</div></div>` : ""}`;
+}
+
+function picturesHtml(p) {
+  const turned = Object.entries(p.turned || {}).map(([pg, deg]) => `p${pg} ${deg}°`);
+  const fixes = (p.corrections || []).map((c) => `p${c.page} ${c.label}, column ${c.col}: ${c.was ?? "blank"} → ${c.now}`);
+  return `<div>
+      <p class="block-title">Read from pictures</p>
+      <div class="kv"><span>pages <b>${(p.pages || []).map((x) => `p${x}`).join(", ")}</b></span><span>${p.tables} table${p.tables === 1 ? "" : "s"} copied by ${esc(p.model || "")}</span>
+        ${turned.length ? `<span>turned upright: ${esc(turned.join(", "))}</span>` : ""}
+        <span>${fixes.length ? `${fixes.length} figure${fixes.length === 1 ? "" : "s"} corrected on a second, enlarged reading` : "every row added up on the first reading"}</span></div>
+      ${fixes.length ? `<details style="margin-top:8px"><summary>Corrected figures</summary><div class="check-list">${fixes.map((f) => `<div><span>${esc(f)}</span></div>`).join("")}</div></details>` : ""}
+      ${(p.doubtful || []).length ? `<div class="notice" style="margin-top:10px">${icon("alert")}<div><b>Check against the PDF</b> (yellow on the workbook’s Transcription sheet)<br>${(p.doubtful || []).map(esc).join("<br>")}</div></div>` : ""}
+    </div>`;
 }
 
 function showDetails(a) {

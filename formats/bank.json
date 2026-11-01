@@ -28,19 +28,19 @@
      "key": "fee_income",
      "label": "Fee & Commission Income",
      "kind": "item",
-     "hint": "Net fee and commission income"
+     "hint": "Net fee and commission income, if shown separately"
     },
     {
      "key": "other_non_interest_income",
      "label": "Other Non-Interest Income",
      "kind": "item",
-     "hint": "Trading, investment, insurance and other income (a bank's 'Other income'), excluding fees if shown separately"
+     "hint": "Trading, investment, insurance and other income (an Indian bank's 'Other Income'), excluding fees if shown separately"
     },
     {
      "key": "total_operating_income",
      "label": "Total Operating Income",
      "kind": "total",
-     "hint": "Total operating income NET of interest expense, if printed. Not an Indian bank's 'Total Income', which includes gross interest earned"
+     "hint": "Total operating income NET of interest expense, if printed. Leave out an Indian bank's 'Total Income' (interest earned + other income): the program computes the net figure"
     },
     {
      "key": "staff_costs",
@@ -58,7 +58,7 @@
      "key": "total_operating_expenses",
      "label": "Total Operating Expenses",
      "kind": "total",
-     "hint": "Operating expenses total; negative"
+     "hint": "Operating expenses: staff costs + other operating expenses; negative. Not 'Total Expenditure', which also includes interest expended"
     },
     {
      "key": "operating_profit_pre_provisions",
@@ -76,19 +76,19 @@
      "key": "share_associates",
      "label": "Share of Results of Associates",
      "kind": "item",
-     "hint": "Share of profit/(loss) of associates and joint ventures"
+     "hint": "Share of profit/(loss) of associates and joint ventures shown BEFORE profit before tax"
     },
     {
      "key": "exceptional_items",
      "label": "Exceptional Items",
      "kind": "item",
-     "hint": "Exceptional / extraordinary items on the face of the statement"
+     "hint": "Exceptional items as they affect profit: a charge is negative (an Indian bank's 'Profit before tax (7-8-9)' deducts them)"
     },
     {
      "key": "profit_before_tax",
      "label": "Profit Before Tax",
      "kind": "total",
-     "hint": "Profit/(loss) before tax"
+     "hint": "Profit/(loss) before tax (Indian banks: profit from ordinary activities before tax)"
     },
     {
      "key": "tax",
@@ -100,19 +100,25 @@
      "key": "profit_after_tax",
      "label": "Profit After Tax",
      "kind": "total",
-     "hint": "Net profit for the period"
+     "hint": "Profit after tax BEFORE minority interest and any share of associates added after tax: the first profit line after tax (Indian banks: 'Net Profit from Ordinary Activities after tax (10-11)'). Not a bottom line that already deducts minority interest"
+    },
+    {
+     "key": "share_associates_after_tax",
+     "label": "Share of Results of Associates (after tax)",
+     "kind": "item",
+     "hint": "Share of profit/(loss) of associates added AFTER tax (Indian banks: 'Add: Share of earnings in Associates' below profit after tax); leave out when associates come before profit before tax"
     },
     {
      "key": "pat_shareholders",
      "label": "Profit Attributable to Shareholders",
      "kind": "total",
-     "hint": "Attributable to owners / equity holders of the bank (Group)"
+     "hint": "Profit attributable to owners / equity holders of the bank: the bottom line after minority interest and associates (Indian consolidated results: 'Net Profit for the period (12-13+14+15)' / 'attributable to the Group')"
     },
     {
      "key": "pat_minority",
      "label": "Minority Interests",
      "kind": "item",
-     "hint": "Attributable to non-controlling / minority interest"
+     "hint": "Profit attributable to non-controlling / minority interest; positive for a profit, even where printed as 'Less: Minority Interest'"
     },
     {
      "key": "eps_basic",
@@ -170,7 +176,7 @@
      "key": "other_assets",
      "label": "Other Assets",
      "kind": "item",
-     "hint": "Other assets, derivatives, goodwill and intangibles"
+     "hint": "Other assets, derivatives, goodwill (incl. goodwill on consolidation) and intangibles"
     },
     {
      "key": "total_assets",
@@ -199,7 +205,7 @@
      "key": "bank_borrowings",
      "label": "Borrowings & Debt Issued",
      "kind": "item",
-     "hint": "Borrowings, debt securities, subordinated debt"
+     "hint": "Borrowings, bonds, debt securities, subordinated debt"
     },
     {
      "key": "other_liabilities",
@@ -376,13 +382,14 @@
     {
      "key": "cf_borrowings_proceeds",
      "label": "Proceeds from Borrowings",
-     "kind": "item"
+     "kind": "item",
+     "hint": "Proceeds from borrowings, bonds, debentures and subordinated debt issued"
     },
     {
      "key": "cf_borrowings_repaid",
      "label": "Repayment of Borrowings",
      "kind": "item",
-     "hint": "Negative"
+     "hint": "Repayment of borrowings, redemption of bonds / debentures / subordinated debt; negative"
     },
     {
      "key": "cf_lease_payments",
@@ -394,13 +401,13 @@
      "key": "cf_interest_paid_fin",
      "label": "Interest Paid (Financing)",
      "kind": "item",
-     "hint": "Negative"
+     "hint": "Interest paid in financing activities, incl. interest on bonds / subordinated debt; negative"
     },
     {
      "key": "cf_dividends_paid",
      "label": "Dividends Paid",
      "kind": "item",
-     "hint": "To owners and non-controlling interests combined; negative"
+     "hint": "To owners and non-controlling interests combined (incl. dividend tax); negative"
     },
     {
      "key": "cf_share_issue",
@@ -416,7 +423,8 @@
     {
      "key": "cf_other_financing",
      "label": "Other Financing Activities",
-     "kind": "item"
+     "kind": "item",
+     "hint": "Other financing flows (e.g. minority interest contributions)"
     },
     {
      "key": "cf_net_financing",

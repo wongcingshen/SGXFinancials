@@ -7,12 +7,13 @@ Routes (the operation is also accepted as ?op=health|screen|process on any path)
 On Vercel, /api/browse (api/browse.mjs) runs the headless browser for screening and attachments.
 
 Environment variables (Vercel > Project > Settings > Environment Variables)
-  GLM_FLASH           optional: NVIDIA (nvapi-) or Z.ai key; picture filings go to GLM 5.3 Flash first
+  GLM_FLASH           optional: NVIDIA (nvapi-) or Z.ai key for GLM 5.3 Flash, the fallback for picture filings
   GEMINI_API_KEY      AI key for extraction (or ANTHROPIC_API_KEY to use Claude); set it on
                       THIS Vercel project (not only another project), then redeploy
   APP_PASSWORD        recommended: callers must send it as X-App-Password
   SGX_AUTH_TOKEN      only if api.sgx.com starts rejecting anonymous requests
   SGX_GEMINI_MODEL    optional: pin a Gemini model (CLAUDE_MODEL for Claude)
+  SGX_VISION_MODEL    optional: the Gemini model that reads pictures (default Flash, then Flash-Lite)
   AI_PROVIDER         optional: gemini | anthropic, when both keys are set
 """
 
@@ -105,6 +106,9 @@ def health():
         project=os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or os.environ.get("VERCEL_URL"),
         ai_vars=extractor.ai_env_names(),
         photo_model=_photo_model(),
+        # Who reads picture filings, in order: Gemini's vision models, then GLM.
+        vision_models=(extractor.vision_models()[:2] if extractor.provider() == "gemini" else [])
+        + ([_photo_model()] if _photo_model() else []),
     )
 
 
@@ -262,6 +266,7 @@ def process():
     scan_info = {
         "pdf": pdf.name, "page_count": scan.page_count, "selected": scan.selected,
         "image_only_pages": scan.image_only_pages,
+        "scanned_pages": scan.scanned_pages,  # scans with a hidden OCR text layer
         "candidates": {st: sorted(({"page": p.page, "score": p.scores[st]} for p in scan.pages),
                                   key=lambda x: -x["score"])[:5] for st in scan.selected},
         "attachments": names, "downloaded": downloaded, "used_url": used_url,
@@ -289,13 +294,13 @@ def process():
             "In Vercel open THIS project → Settings → Environment Variables, add GEMINI_API_KEY "
             f"with {where.title()} ticked, then Deployments → Redeploy.")), 500
     ai_started = time.monotonic()
-    res = process_pdf(pdf, scan=scan, pages=chosen, meta=meta,
+    res = process_pdf(pdf, scan=scan, pages=pages or None, meta=meta,
                       effort=f.get("effort", "high"), cache_dir=WORK, deadline=deadline, formats=formats)
     timings["ai"] = round(time.monotonic() - ai_started, 1)
     existing = request.files["workbook"].read() if request.files.get("workbook") else None
     data, checks = workbook_bytes(existing, res.normalised, res.meta, formats)
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", res.meta.get("stock_code") or res.meta.get("company_name") or "").strip("_") or "financials"
     return jsonify(
-        scan=scan_info, pages=chosen, extracted=True, meta=res.meta, usage=res.usage, checks=checks, timings=timings,
+        scan=scan_info, pages=res.pages, extracted=True, meta=res.meta, usage=res.usage, checks=checks, timings=timings,
         filename=f"{name}.xlsx", workbook_b64=base64.b64encode(data).decode(),
     )

@@ -29,9 +29,9 @@ def load_app():
 def install_mocks():
     import os
 
-    from sgx_fin import extractor, pipeline
+    from sgx_fin import extractor, pictures, pipeline
     from sgx_fin.sgx_client import Announcement, SGXClient
-    from test_offline import FAKE
+    from test_offline import FAKE, bob_reading, bob_tables, picture_pdf
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         os.environ.setdefault("GEMINI_API_KEY", "mock")
@@ -54,6 +54,8 @@ def install_mocks():
         # a pair whose file names don't say which is which: the statement headings decide
         ("ABA", "ABC HOLDINGS LTD", "20:00", "Financial Statements and Related Announcement::Full Yearly Results"),
         ("ABB", "ABC HOLDINGS LTD", "20:01", "Financial Statements and Related Announcement::Full Yearly Results"),
+        # statements that are scanned pictures: found, copied, checked and re-read
+        ("2V6B", "BANK OF BARODA", "19:39", "Financial Statements and Related Announcement::Second Quarter and/ or Half Yearly Results"),
     ]
     named = {
         "NVA": ["20261030_NVLG_CONSOLIDATED_FS_2026Q3.pdf", "20261030_NVLG_EXPLANATION_CONSOL_FS_2026Q3.pdf"],
@@ -62,6 +64,8 @@ def install_mocks():
     }
     separate = ROOT / "tests" / "separate_results.pdf"
     notice = ROOT / "tests" / "notice.pdf"
+    (ROOT / "tests" / "out").mkdir(exist_ok=True)
+    scanned = picture_pdf(sample, ROOT / "tests" / "out" / "mock_SESGXFINAL.pdf")
 
     def screen(self, s, company=None, attachments=False):
         time.sleep(0.8)
@@ -88,7 +92,8 @@ def install_mocks():
         time.sleep(0.6)
         dest_dir.mkdir(parents=True, exist_ok=True)
         out = dest_dir / (re.sub(r"[^A-Za-z0-9_.-]+", "_", url.split("/FileOpen/")[-1].split(".ashx")[0])[-60:] + ".pdf")
-        src = notice if ("KSH" in url or "NTC" in url) else separate if ("NVB" in url or "ABB" in url) else sample
+        src = (notice if ("KSH" in url or "NTC" in url) else separate if ("NVB" in url or "ABB" in url)
+               else scanned if "2V6B" in url else sample)
         shutil.copy(src, out)
         return out
 
@@ -97,8 +102,31 @@ def install_mocks():
         data = {**FAKE, "notes": "Mock extraction from the sample PDF; figures are illustrative."}
         return extractor.Extraction(data, "mock " + extractor.default_model(), {"input_tokens": 6120, "output_tokens": 2310})
 
+    def locate(pdf, pages, **kw):
+        time.sleep(1.2)
+        found = [{"page": 5, "heading": "Un-Audited Consolidated Financial Results", "statements": ["income_statement"], "basis": "consolidated", "turn": "0"},
+                 {"page": 6, "heading": "Statement of Assets & Liabilities", "statements": ["balance_sheet", "cash_flow"], "basis": "consolidated", "turn": "90"}]
+        return pictures.Located([5, 6], found, "consolidated", "mock gemini-3.5-flash-lite")
+
+    def read(pdf, pages, turns=None, **kw):
+        time.sleep(2.0)
+        tables = pictures.clean_tables(bob_tables(misread=False), pages)
+        row = next(i for i, r in enumerate(tables[0]["rows"]) if r["label"].startswith("Operating Expenses"))
+        fixes = [{"page": 5, "table": 0, "row": row, "label": tables[0]["rows"][row]["label"], "col": c, "was": was, "now": now}
+                 for c, was, now in ((4, "1584381", "1988070"), (6, "2877332", "3871744"))]
+        return pictures.Reading(pages, tables, "mock gemini-3.5-flash", {"input_tokens": 9000, "output_tokens": 4000},
+                                corrections=fixes, turned={6: 90})
+
+    def extract_text(pdf, pages, tables, **kw):
+        time.sleep(1.0)
+        data = bob_reading(16082312)
+        for st, nums in (("income_statement", [5]), ("balance_sheet", [6]), ("cash_flow", [6])):
+            data[st]["page_numbers"] = nums  # original page numbers, as the template step is told
+        return extractor.Extraction(data, "mock gemini-3.5-flash-lite", {"input_tokens": 3000, "output_tokens": 900})
+
     SGXClient.screen, SGXClient.attachments, SGXClient.download = screen, attachments, download
     pipeline.extractor.extract = extract
+    pictures.locate, pictures.read, extractor.extract_text = locate, read, extract_text
 
 
 if __name__ == "__main__":

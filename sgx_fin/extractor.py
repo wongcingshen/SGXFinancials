@@ -5,6 +5,10 @@ Two providers, picked from the environment (override with AI_PROVIDER=gemini|ant
            (GOOGLE_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_KEY also work)
   Claude   ANTHROPIC_API_KEY   model CLAUDE_MODEL, else claude-opus-5-5
 Both get the same prompt, the same PDF excerpt and the same JSON schema.
+
+Scanned / photographed filings are first transcribed by sgx_fin.pictures (tables copied as printed,
+checked, doubtful rows re-read); extract_text() then fills the template from that text, the same
+way as for a text filing. extract(vision=True) reads picture pages directly when that fails.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from pathlib import Path
 
 from pypdf import PdfReader, PdfWriter
 
+from . import checks
 from . import template as T
 
 CLAUDE_DEFAULT = "claude-opus-5-5"
@@ -31,6 +36,9 @@ CLAUDE_DEFAULT = "claude-opus-5-5"
 # GEMINI_MODEL: other apps sharing the Vercel team's variables, such as TravelFriend, use that.)
 GEMINI_KEY_VARS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY", "GEMINI_KEY")
 GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest"]
+# Picture filings are few and hard to read: a stronger model reads their 2-6 statement pages, with
+# Flash-Lite behind it when Flash's smaller daily quota is used up. SGX_VISION_MODEL pins one.
+VISION_MODELS = ["gemini-3.5-flash", "gemini-flash-latest"]
 UNIT_FACTORS = {"units": 1, "thousands": 1_000, "lakhs": 100_000, "millions": 1_000_000,
                 "crores": 10_000_000, "billions": 1_000_000_000}
 DEFAULT_UNIT = "thousands"  # when a filing doesn't say: SGX statements are almost always in '000
@@ -196,6 +204,12 @@ def default_model(prov: str | None = None) -> str:
     return os.environ.get("CLAUDE_MODEL") or CLAUDE_DEFAULT
 
 
+def vision_models() -> list[str]:
+    """Gemini models for reading picture pages, in order."""
+    pinned = os.environ.get("SGX_VISION_MODEL", "").strip() or os.environ.get("SGX_GEMINI_MODEL", "").strip()
+    return [pinned] if pinned else list(dict.fromkeys(VISION_MODELS + GEMINI_MODELS))
+
+
 def provider_label(prov: str | None = None) -> str:
     return {"gemini": "Gemini", "anthropic": "Claude"}.get(prov or provider() or "", "AI")
 
@@ -210,65 +224,109 @@ def excerpt_pdf(pdf: Path, pages: list[int]) -> bytes:
     return buf.getvalue()
 
 
+def render_jpegs(pdf: Path, pages: list[int], long_side: int, quality: int = 80) -> list[bytes]:
+    """The given 1-based pages as JPEG bytes, scaled so the longer side is `long_side` px."""
+    import pypdfium2 as pdfium
+
+    doc = pdfium.PdfDocument(str(pdf))
+    try:
+        out = []
+        for p in pages:
+            page = doc[p - 1]
+            w, h = page.get_size()
+            img = page.render(scale=long_side / max(w, h)).to_pil().convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, "JPEG", quality=quality)
+            out.append(buf.getvalue())
+        return out
+    finally:
+        doc.close()
+
+
 def _instruction(pdf: Path, pages: list[int], vision: bool = False, locate: bool = False) -> str:
     if locate and not vision:
         return (f"These {len(pages)} pages (original pages {pages} of {pdf.name}) may contain more than the "
                 "statements: find the income statement, balance sheet and cash flow statement among them "
                 "(the Group's primary statements; ignore commentary, notes, segment and ratio tables), give "
                 "each statement's page_numbers, and fill the template. Leave out any statement that isn't there.")
-    if vision:
+    if vision and locate:
         return (f"These {len(pages)} pages (original pages {pages} of {pdf.name}) include scanned or "
                 "photographed pages, so read them visually. They contain more than the statements: find the "
                 "income statement, balance sheet and cash flow statement among them (ignore commentary, "
                 "notes and other pages), give each statement's page_numbers, and fill the template. If a "
                 "picture is too unclear to read a figure with confidence, leave that figure out and say so in notes.")
+    if vision:
+        return (f"These {len(pages)} pages (original pages {pages} of {pdf.name}) are scanned or photographed "
+                "pages that hold the statements. Read them visually, line by line and digit by digit: follow each "
+                "line across to its own figures, keep every figure under its own column heading, and read the "
+                "sign from the brackets. If a figure is too unclear to read with confidence, leave it out and say "
+                "so in notes.")
     return (f"These {len(pages)} pages (original pages {pages} of {pdf.name}) were selected as the "
             "income statement, balance sheet and cash flow statement. Fill the template.")
 
 
+RECHECK = ("\n\nA first reading of these pages did not add up:\n{fails}\nRead the lines involved again, digit by "
+           "digit, and check each figure's column, sign and template line (e.g. a total taken for a sub-total). Then "
+           "return the whole template again with the figures exactly as printed.")
+
+
 def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str = "high",
             cache_dir: Path | None = None, client=None, vision: bool = False,
-            locate: bool = False, deadline: float | None = None, formats: dict | None = None) -> Extraction:
+            locate: bool = False, deadline: float | None = None, formats: dict | None = None,
+            context: str = "", recheck: str = "") -> Extraction:
     """Send only `pages` of `pdf` to the AI and return the parsed JSON.
 
-    Picture filings (vision=True) go to GLM 5.3 Flash first when GLM_FLASH is set, falling back to
-    the main provider (Gemini / Claude) if it fails; everything else goes to the main provider.
-    `deadline` (time.monotonic()) bounds the whole step: GLM gets a share that leaves the fallback
-    time to answer.
+    Picture pages (vision=True) go to the main provider as sharp images (Gemini: Flash, then
+    Flash-Lite), with GLM 5.3 Flash behind it when GLM_FLASH is set; everything else goes to the
+    main provider as a PDF excerpt. `context` is added to the instruction (what the pages are);
+    `recheck` lists checks a first reading failed, for a second look. `deadline`
+    (time.monotonic()) bounds the whole step.
     """
     from . import glm
 
     prov = provider()
     deadline = deadline or time.monotonic() + 280
-    attempts = []
-    # GLM on a free tier can be slow; only try it with time to spare for a fallback.
-    if vision and glm.api_key() and not model and (deadline - time.monotonic() > 100 or not prov):
+    attempts = [prov] if prov else []
+    if vision and glm.api_key() and not model:
         attempts.append("glm")
-    if prov:
-        attempts.append(prov)
     if not attempts:
         raise RuntimeError("No AI key configured: set GEMINI_API_KEY (or GLM_FLASH for picture filings)")
 
     formats = formats or T.BUILTIN
     system, schema = build_system(formats), build_schema(formats)
     pdf_bytes = excerpt_pdf(pdf, pages)
-    instruction = _instruction(pdf, pages, vision, locate)
+    instruction = _instruction(pdf, pages, vision, locate) + (f"\n\n{context}" if context else "")
+    if recheck:
+        instruction += RECHECK.format(fails=recheck)
     failures = []
     for who in attempts:
-        name = glm.label() if who == "glm" else (model or default_model(who))
-        cache_key = hashlib.sha256(pdf_bytes + f"{who}:{name}:{vision}:{locate}".encode() + system.encode()).hexdigest()[:16]
+        if who == "glm" and failures and deadline - time.monotonic() < 45:
+            failures.append(f"{glm.label()}: skipped, not enough time left")
+            break
+        name = glm.label() if who == "glm" else (model or (vision_models()[0] if vision and who == "gemini" else default_model(who)))
+        cache_key = hashlib.sha256(pdf_bytes + f"{who}:{name}:{vision}:{locate}".encode()
+                                   + system.encode() + instruction.encode()).hexdigest()[:16]
         cache_file = (cache_dir or pdf.parent) / f"{pdf.stem}.{cache_key}.extract.json"
         if cache_file.exists():
             cached = json.loads(cache_file.read_text())
             return Extraction(cached["data"], cached["model"], cached.get("usage", {}))
         try:
             if who == "glm":
-                budget = deadline if not prov else min(deadline - 75, time.monotonic() + 150)
-                data, used, usage = glm.extract(pdf, pages, system, instruction, deadline=budget, formats=formats)
+                data, used, usage = glm.extract(pdf, pages, system, instruction, deadline=deadline, formats=formats)
                 ex = Extraction(data, f"{used} via {'NVIDIA' if glm.is_nvidia() else 'Z.ai'}",
                                 {"input_tokens": usage.get("prompt_tokens"), "output_tokens": usage.get("completion_tokens")})
+            elif who == "gemini" and vision:
+                # A few pages: big images at the finest resolution; a long shortlist: smaller ones.
+                few = len(pages) <= 8
+                images = [(f"Page {i}:", jpg) for i, jpg in
+                          enumerate(render_jpegs(pdf, pages, 2400 if few else 1600, 85 if few else 75), 1)]
+                ex = _gemini(None, instruction, name, effort, client, deadline=deadline, system=system,
+                             schema_json=schema, images=images, candidates=None if model else vision_models(),
+                             resolution="MEDIA_RESOLUTION_HIGH",
+                             part_resolution="MEDIA_RESOLUTION_ULTRA_HIGH" if few else None)
             elif who == "gemini":
-                ex = _gemini(pdf_bytes, instruction, name, effort, client, vision, deadline, system, schema)
+                ex = _gemini(pdf_bytes, instruction, name, effort, client, deadline=deadline, system=system,
+                             schema_json=schema)
             else:
                 ex = _claude(pdf_bytes, instruction, name, effort, client, system, schema)
         except Exception as e:  # try the next provider, report all if none works
@@ -281,8 +339,57 @@ def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str =
     raise RuntimeError(" | ".join(failures))
 
 
+TABLES_INSTRUCTION = """These tables were copied from pictures of pages {pages} of {name}, figures exactly as printed (brackets and minus signs are negatives; "-" is nil; "?" was unreadable: leave it out).
+
+{tables}
+Fill the template from them, as you would from the statements themselves. `periods` lists the columns you used with their numbers as in [brackets]; each figure goes in `cells` under that column number. When there are consolidated and standalone tables, use the consolidated ones. `page_numbers` are the page numbers in the table titles. Lines printed as deductions ("Less: ...", "Provision for taxes", "Exceptional items" in "(7-8-9)") are charges: give them the sign they have on profit."""
+
+
+def extract_text(pdf: Path, pages: list[int], tables: str, model: str | None = None, effort: str = "high",
+                 cache_dir: Path | None = None, client=None, deadline: float | None = None,
+                 formats: dict | None = None, recheck: str = "") -> Extraction:
+    """Fill the template from tables already transcribed as text (picture filings): no pictures,
+    so the main provider's text model maps them (GLM when there is no other key)."""
+    from . import glm
+
+    prov = provider()
+    deadline = deadline or time.monotonic() + 120
+    formats = formats or T.BUILTIN
+    system, schema = build_system(formats), build_schema(formats)
+    instruction = TABLES_INSTRUCTION.format(pages=pages, name=pdf.name, tables=tables)
+    if recheck:
+        instruction += RECHECK.format(fails=recheck).replace("Read the lines involved again, digit by digit, and check",
+                                                             "Look at the lines involved again and check")
+    attempts = ([prov] if prov else []) + (["glm"] if glm.api_key() else [])
+    if not attempts:
+        raise RuntimeError("No AI key configured: set GEMINI_API_KEY")
+    failures = []
+    for who in attempts:
+        name = glm.label() if who == "glm" else (model or default_model(who))
+        key = hashlib.sha256(f"{who}:{name}".encode() + system.encode() + instruction.encode()).hexdigest()[:16]
+        cache_file = (cache_dir or pdf.parent) / f"{pdf.stem}.{key}.map.json"
+        if cache_file.exists():
+            c = json.loads(cache_file.read_text())
+            return Extraction(c["data"], c["model"], c.get("usage", {}))
+        try:
+            if who == "glm":
+                answer, used, usage = glm.ask(system + "\n\n" + glm.SKELETON, instruction, None, deadline)
+                ex = Extraction(glm.coerce(answer, formats), f"{used} via {'NVIDIA' if glm.is_nvidia() else 'Z.ai'}",
+                                {"input_tokens": usage.get("prompt_tokens"), "output_tokens": usage.get("completion_tokens")})
+            elif who == "gemini":
+                ex = _gemini(None, instruction, name, effort, client, deadline=deadline, system=system, schema_json=schema)
+            else:
+                ex = _claude(None, instruction, name, effort, client, system, schema)
+        except Exception as e:
+            failures.append(f"{glm.label() if who == 'glm' else provider_label(who)}: {e}")
+            continue
+        cache_file.write_text(json.dumps({"data": ex.data, "model": ex.model, "usage": ex.usage}, indent=2))
+        return ex
+    raise RuntimeError(" | ".join(failures))
+
+
 # ------------------------------------------------------------------ Claude
-def _claude(pdf_bytes: bytes, instruction: str, model: str, effort: str, client,
+def _claude(pdf_bytes: bytes | None, instruction: str, model: str, effort: str, client,
             system: str = SYSTEM, schema: dict = SCHEMA) -> Extraction:
     import anthropic
 
@@ -296,12 +403,10 @@ def _claude(pdf_bytes: bytes, instruction: str, model: str, effort: str, client,
         fallbacks="default",
         messages=[{
             "role": "user",
-            "content": [
-                {"type": "document", "source": {
-                    "type": "base64", "media_type": "application/pdf",
-                    "data": base64.standard_b64encode(pdf_bytes).decode()}},
-                {"type": "text", "text": instruction},
-            ],
+            "content": ([{"type": "document", "source": {
+                "type": "base64", "media_type": "application/pdf",
+                "data": base64.standard_b64encode(pdf_bytes).decode()}}] if pdf_bytes else [])
+            + [{"type": "text", "text": instruction}],
         }],
     ) as stream:
         msg = stream.get_final_message()
@@ -347,43 +452,71 @@ def gemini_schema(node):
     return out
 
 
-def _gemini(pdf_bytes: bytes, instruction: str, model: str, effort: str, client, vision: bool = False,
-            deadline: float | None = None, system: str = SYSTEM, schema_json: dict = SCHEMA) -> Extraction:
+def _gemini(pdf_bytes: bytes | None, instruction: str, model: str, effort: str, client, vision: bool = False,
+            deadline: float | None = None, system: str = SYSTEM, schema_json: dict = SCHEMA,
+            images: list[tuple[str, bytes]] | None = None, candidates: list[str] | None = None,
+            resolution: str | None = None, part_resolution: str | None = None) -> Extraction:
+    """One Gemini call: a PDF excerpt, or labelled JPEG pages (`images`). `resolution` is the media
+    resolution for the request (vision=True means high); `part_resolution` a finer one set on each
+    image (e.g. ULTRA_HIGH, which needs the v1alpha API). Settings a model rejects are dropped in turn."""
     from google import genai
     from google.genai import errors, types
 
-    client = client or genai.Client(
-        api_key=gemini_key(),
-        http_options=types.HttpOptions(timeout=int(max(30.0, min(280.0, (deadline or time.monotonic() + 280) - time.monotonic())) * 1000)),
-    )
-    pinned = bool(os.environ.get("SGX_GEMINI_MODEL", "").strip())
-    candidates = [model] + ([] if pinned else [m for m in GEMINI_MODELS if m != model])
+    timeout = int(max(30.0, min(280.0, (deadline or time.monotonic() + 280) - time.monotonic())) * 1000)
+    if client is None:
+        client = genai.Client(api_key=gemini_key(), http_options=types.HttpOptions(timeout=timeout))
+        alpha = (genai.Client(api_key=gemini_key(), http_options=types.HttpOptions(timeout=timeout, api_version="v1alpha"))
+                 if part_resolution else None)
+    else:
+        alpha = client
+    if candidates is None:
+        pinned = bool(os.environ.get("SGX_GEMINI_MODEL", "").strip())
+        candidates = [model] + ([] if pinned else [m for m in GEMINI_MODELS if m != model])
+    candidates = list(dict.fromkeys([model, *candidates] if model not in candidates else candidates))
     schema = gemini_schema(schema_json)
-    contents = [types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"), instruction]
+    resolution = resolution or ("MEDIA_RESOLUTION_HIGH" if vision else None)
 
-    def config(extras: bool):
-        # extras: thinking level, and high resolution for scanned / photographed pages (small digits)
+    def contents(fine: bool):
+        if images is None:
+            return ([types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")] if pdf_bytes else []) + [instruction]
+        parts = []
+        for label, jpg in images:
+            parts.append(types.Part.from_text(text=label))
+            part = types.Part.from_bytes(data=jpg, mime_type="image/jpeg")
+            if fine:
+                part.media_resolution = types.PartMediaResolution(level=part_resolution)
+            parts.append(part)
+        parts.append(types.Part.from_text(text=instruction))
+        return [types.Content(role="user", parts=parts)]
+
+    def config(thinking: bool, res: str | None):
         return types.GenerateContentConfig(
             system_instruction=system,
             response_mime_type="application/json",
             response_schema=schema,
             max_output_tokens=65536,
-            thinking_config=types.ThinkingConfig(thinking_level=GEMINI_THINKING.get(effort, "MEDIUM"))
-            if extras and thinking else None,
-            media_resolution="MEDIA_RESOLUTION_HIGH" if extras and vision else None,
+            thinking_config=types.ThinkingConfig(thinking_level=GEMINI_THINKING.get(effort, "MEDIUM")) if thinking else None,
+            media_resolution=res,
         )
 
     last_err: Exception | None = None
     for name in candidates:
         thinking = not name.startswith("gemini-2")  # 2.x models use thinking budgets, not levels
+        # Finest settings first; on a 400 (setting not supported) step down to the model's defaults.
+        variants = []
+        if part_resolution and images is not None:
+            variants.append((alpha, True, thinking, None))
+        if resolution or thinking:
+            variants.append((client, False, thinking, resolution))
+        variants.append((client, False, False, None))
         try:
-            try:
-                resp = client.models.generate_content(model=name, contents=contents, config=config(True))
-            except errors.ClientError as e:
-                if e.code != 400 or not (thinking or vision):
-                    raise
-                # Some models reject a thinking level or resolution: retry once with their defaults.
-                resp = client.models.generate_content(model=name, contents=contents, config=config(False))
+            for n, (cl, fine, think, res) in enumerate(variants):
+                try:
+                    resp = cl.models.generate_content(model=name, contents=contents(fine), config=config(think, res))
+                    break
+                except errors.ClientError as e:
+                    if e.code != 400 or n == len(variants) - 1:
+                        raise
         except errors.ClientError as e:
             if e.code in (404, 429):
                 last_err = e
@@ -453,10 +586,19 @@ def _derive_bank(st: str, values: dict, labels: dict, n: int) -> None:
     def total(*keys):
         return lambda i: None if col(keys[0])[i] is None else sum(col(k)[i] or 0 for k in keys)
 
+    def both(a, b):
+        return lambda i: None if col(a)[i] is None or col(b)[i] is None else col(a)[i] + col(b)[i]
+
     if st == "income_statement":
-        derive("net_interest_income", "interest income + interest expense",
-               lambda i: None if col("interest_income")[i] is None or col("interest_expense")[i] is None
-               else col("interest_income")[i] + col("interest_expense")[i])
+        derive("net_interest_income", "interest income + interest expense", both("interest_income", "interest_expense"))
+        derive("total_operating_income", "net interest income + non-interest income",
+               lambda i: None if col("net_interest_income")[i] is None
+               or (col("fee_income")[i] is None and col("other_non_interest_income")[i] is None)
+               else total("net_interest_income", "fee_income", "other_non_interest_income")(i))
+        derive("total_operating_expenses", "staff costs + other operating expenses",
+               both("staff_costs", "other_operating_expenses_bank"))
+        derive("operating_profit_pre_provisions", "total operating income + total operating expenses",
+               both("total_operating_income", "total_operating_expenses"))
     if st == "balance_sheet":
         derive("shareholders_equity", "share capital + reserves (+ perpetual securities, treasury shares)",
                lambda i: None if col("share_capital")[i] is None or col("reserves")[i] is None
@@ -465,6 +607,30 @@ def _derive_bank(st: str, values: dict, labels: dict, n: int) -> None:
         derive("total_liabilities", "total assets - total equity",
                lambda i: None if col("total_assets")[i] is None or col("total_equity")[i] is None
                else col("total_assets")[i] - col("total_equity")[i])
+
+
+def _net_bank_income(values: dict, labels: dict, n: int, step: float) -> None:
+    """An Indian bank's "Total Income" is interest earned + other income, before interest expended. When
+    that gross figure was given as total operating income, replace it with the net figure."""
+    toi, ii = values.get("total_operating_income"), values.get("interest_income")
+    if not toi or not ii:
+        return
+    col = lambda k: values.get(k) or [None] * n  # noqa: E731
+    ie, nii, fee, oth = col("interest_expense"), col("net_interest_income"), col("fee_income"), col("other_non_interest_income")
+    fixed = False
+    for i in range(n):
+        if toi[i] is None or ii[i] is None:
+            continue
+        gross = ii[i] + (fee[i] or 0) + (oth[i] or 0)
+        net = nii[i] if nii[i] is not None else (ii[i] - abs(ie[i]) if ie[i] is not None else None)
+        if net is None or abs(gross - net) <= checks.tolerance(gross, step):
+            continue
+        if abs(toi[i] - gross) <= checks.tolerance(gross, step):
+            toi[i] = round(net + (fee[i] or 0) + (oth[i] or 0), 3)
+            fixed = True
+    if fixed:
+        labels["total_operating_income"] = ("computed: net interest income + non-interest income (the filing's "
+                                            "'Total Income' includes gross interest earned)")
 
 
 def _apply_formulas(st: str, rows: list, values: dict, labels: dict, n: int) -> None:
@@ -538,6 +704,11 @@ def normalise(data: dict, formats: dict | None = None) -> dict:
                 vals = [a if a is not None else b for a, b in zip(values[row["key"]], vals)]
             values[row["key"]] = vals
             labels.setdefault(row["key"], row["source_label"])
+        # A sign read backwards is put right where the printed totals prove it, before anything is
+        # derived from it.
+        if st == "income_statement":
+            _net_bank_income(values, labels, n, factor)
+        checks.repair_signs(st, values, labels, n, factor)
         # Derived lines work by meaning (key), whatever the format calls them; each only fills a
         # line the filing didn't print, from parts the filing did print.
         _derive_bank(st, values, labels, n)
@@ -551,5 +722,6 @@ def normalise(data: dict, formats: dict | None = None) -> dict:
                 for o, c in zip(values["cf_net_operating"], capex)
             ]
             labels["free_cash_flow"] = "computed: net operating cash flow + capex"
-        out[st] = {"periods": periods, "values": values, "labels": labels, "format": fmt}
+        # step: output units per unit of the filing (100 for lakhs), for rounding tolerance in checks
+        out[st] = {"periods": periods, "values": values, "labels": labels, "format": fmt, "step": factor}
     return out

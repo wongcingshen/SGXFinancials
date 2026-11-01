@@ -2,7 +2,9 @@
 
 Sheets: Income Statement, Balance Sheet, Cash Flow (row labels down column A,
 one column per period), Checks (arithmetic tie-outs), Source Map (which
-company line each figure came from). Every run merges into the existing
+company line each figure came from), and for filings whose statements are
+pictures, Transcription (the tables as read from the pictures, re-read figures
+and rows that still don't add up marked). Every run merges into the existing
 workbook, so quarterly / half-year / full-year filings accumulate as columns.
 A hidden "_store" sheet keeps the raw figures so merging never depends on
 display labels.
@@ -16,9 +18,11 @@ from datetime import datetime
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from . import checks as C
 from . import template as T
 
 NUM_FMT = '#,##0;(#,##0);"-"'
@@ -50,8 +54,33 @@ def _load_store(src: Path | bytes | None) -> list[dict]:
     return [json.loads(r[0]) for r in wb["_store"].iter_rows(values_only=True) if r and r[0]]
 
 
+BULKY = ("transcription", "located", "pictures", "rechecked")  # kept once per filing, not per figure
+
+
+def _load_tables(src: bytes | None) -> list[dict]:
+    if not src:
+        return []
+    wb = load_workbook(io.BytesIO(src))
+    if "_tables" not in wb.sheetnames:
+        return []
+    return [json.loads(r[0]) for r in wb["_tables"].iter_rows(values_only=True) if r and r[0]]
+
+
+def merge_tables(existing: list[dict], meta: dict) -> list[dict]:
+    """Transcriptions of picture filings, one per filing (a re-run replaces it), newest first."""
+    if not meta.get("transcription"):
+        return existing
+    key = meta.get("filing") or meta.get("source_pdf") or ""
+    pics = meta.get("pictures") or {}
+    entry = {"key": key, "filing": meta.get("filing", ""), "source_pdf": meta.get("source_pdf", ""),
+             "model": pics.get("model", ""), "tables": meta["transcription"], "corrections": pics.get("corrections", []),
+             "doubtful": pics.get("doubtful", []), "doubtful_rows": pics.get("doubtful_rows", []), "turned": pics.get("turned", {})}
+    return [entry] + [e for e in existing if e.get("key") != key]
+
+
 def merge_records(existing: list[dict], normalised: dict, meta: dict) -> list[dict]:
     """One record per (statement, period_end, months); newer filings replace older ones."""
+    meta = {k: v for k, v in meta.items() if k not in BULKY}
     recs = {(r["statement"], r["period_end"], r["months"]): r for r in existing}
     for st, block in normalised.items():
         for i, p in enumerate(block["periods"]):
@@ -68,7 +97,8 @@ def merge_records(existing: list[dict], normalised: dict, meta: dict) -> list[di
                 continue
             recs[key] = {
                 "statement": st, "period_end": p["period_end"], "months": int(p["months"]),
-                "values": vals, "labels": block["labels"], "is_comparative": i > 0, **meta,
+                "values": vals, "labels": block["labels"], "is_comparative": i > 0,
+                "step": block.get("step", 1.0), **meta,
             }
     return sorted(recs.values(), key=lambda r: (r["statement"], r["period_end"], r["months"]))
 
@@ -86,6 +116,7 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
                    formats: dict | None = None) -> tuple[bytes, list[dict]]:
     """Merge into an existing workbook (or start fresh) and return the new .xlsx bytes."""
     records = merge_records(_load_store(existing), normalised, meta)
+    tables = merge_tables(_load_tables(existing), meta)
     wb = Workbook()
     wb.remove(wb.active)
     company = meta.get("company_name", "")
@@ -106,6 +137,13 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
     checks = run_checks(records)
     _write_checks(wb.create_sheet("Checks"), checks)
     _write_sources(wb.create_sheet("Source Map"), records, formats)
+
+    if tables:
+        _write_transcription(wb.create_sheet("Transcription"), tables)
+        hidden = wb.create_sheet("_tables")
+        for e in tables:
+            hidden.append([json.dumps(e)])
+        hidden.sheet_state = "hidden"
 
     store = wb.create_sheet("_store")
     for r in records:
@@ -164,43 +202,16 @@ def _write_statement(ws, title, rows, recs, company, code, currency):
 
 
 # ------------------------------------------------------------------ checks
-CHECKS = [
-    ("income_statement", "Revenue + COGS = Gross Profit", ["revenue", "cost_of_sales"], "gross_profit"),
-    ("income_statement", "PBT + Tax = PAT (continuing)", ["profit_before_tax", "tax"], "profit_after_tax"),
-    ("income_statement", "Shareholders + MI (+perps) = PAT", ["pat_shareholders", "pat_minority", "perpetual_holders"], "profit_after_tax"),
-    ("balance_sheet", "NCA + CA = Total Assets", ["total_nca", "total_ca"], "total_assets"),
-    ("balance_sheet", "CL + NCL = Total Liabilities", ["total_cl", "total_ncl"], "total_liabilities"),
-    ("balance_sheet", "Total Liabilities + Total Equity = Total Assets", ["total_liabilities", "total_equity"], "total_assets"),
-    ("balance_sheet", "Shareholders' Equity + MI = Total Equity", ["shareholders_equity", "minority_interests"], "total_equity"),
-    ("cash_flow", "Operating + Investing + Financing = Net Change", ["cf_net_operating", "cf_net_investing", "cf_net_financing"], "cf_net_change"),
-    ("cash_flow", "Begin + Net Change + FX = End", ["cf_cash_begin", "cf_net_change", "cf_fx_effect"], "cf_cash_end"),
-    # banks
-    ("income_statement", "Interest Income + Interest Expense = Net Interest Income", ["interest_income", "interest_expense"], "net_interest_income"),
-    ("income_statement", "Operating Profit before Allowances + Allowances (+ associates, exceptional) = PBT",
-     ["operating_profit_pre_provisions", "allowances", "share_associates", "exceptional_items"], "profit_before_tax"),
-]
+CHECKS = C.CHECKS
 
 
 def run_checks(records: list[dict]) -> list[dict]:
     out = []
     for r in records:
         v = r["values"]
-        for st, name, parts, total in CHECKS:
-            if st != r["statement"]:
-                continue
-            if not any(k in v for k in (*parts, total)):
-                continue  # a check for the other format (bank vs general)
-            if str(r.get("labels", {}).get(total, "")).startswith(("computed", "formula")):
-                status, diff = "derived", None  # the total was calculated from these parts
-            elif total not in v or parts[0] not in v or parts[1] not in v:
-                status, diff = "n/a", None
-            else:
-                s = sum(v.get(p) or 0 for p in parts)
-                diff = round(s - v[total], 3)
-                tol = max(2.0, abs(v[total]) * 0.002)  # rounding in '000
-                status = "PASS" if abs(diff) <= tol else "FAIL"
-            out.append({"statement": st, "period": period_label(r["period_end"], r["months"]),
-                        "check": name, "status": status, "difference": diff})
+        for c in C.run(r["statement"], v.get, r.get("labels"), r.get("step", 1.0)):
+            out.append({"statement": c["statement"], "period": period_label(r["period_end"], r["months"]),
+                        "check": c["check"], "status": c["status"], "difference": c["difference"]})
     return out
 
 
@@ -215,6 +226,57 @@ def _write_checks(ws, checks):
         ws.cell(ws.max_row, 4).fill = PatternFill("solid", fgColor=colours[ch["status"]])
     for col, w in zip("ABCDE", (18, 16, 50, 10, 18)):
         ws.column_dimensions[col].width = w
+
+
+FIXED_FILL = PatternFill("solid", fgColor="C6EFCE")
+DOUBT_FILL = PatternFill("solid", fgColor="FFEB9C")
+
+
+def _write_transcription(ws, entries):
+    """The tables as read from the pictures: figures as printed text. Green: changed by the re-read
+    (the first reading is in the cell's comment). Yellow: rows that still don't add up."""
+    ws.column_dimensions["A"].width = 8
+    ws.column_dimensions["B"].width = 60
+    ws.append(["Read from pictures. Green: figure corrected by a second, enlarged reading (first reading in the "
+               "comment). Yellow: a row that still doesn't add up; check it against the PDF."])
+    ws["A1"].font = Font(italic=True, color="595959")
+    for e in entries:
+        fixed = {(c["table"], c["row"], c["col"]): c for c in e.get("corrections", [])}
+        doubt = {tuple(x) for x in e.get("doubtful_rows", [])}
+        for ti, t in enumerate(e["tables"]):
+            ws.append([])
+            title = ws.cell(ws.max_row + 1, 1, f"{e.get('filing') or e.get('source_pdf')} — page {t['page']}: {t['title']}"
+                                               f" ({t.get('basis', '')}; {t.get('unit') or 'unit not stated'})")
+            title.font = Font(bold=True)
+            cols = [c["col"] for c in t["columns"]]
+            head = ws.max_row + 1
+            ws.cell(head, 1, "Ref")
+            ws.cell(head, 2, "Line")
+            for j, c in enumerate(t["columns"], start=3):
+                ws.cell(head, j, c["heading"])
+                ws.column_dimensions[get_column_letter(j)].width = max(ws.column_dimensions[get_column_letter(j)].width or 0, 16)
+            for j in range(1, len(cols) + 3):
+                ws.cell(head, j).font = Font(bold=True, color="FFFFFF")
+                ws.cell(head, j).fill = HEAD_FILL
+                ws.cell(head, j).alignment = Alignment(wrap_text=True, vertical="top")
+            for ri, r in enumerate(t["rows"]):
+                row = ws.max_row + 1
+                ws.cell(row, 1, r.get("ref", ""))
+                ws.cell(row, 2, r.get("label", ""))
+                for j, col in enumerate(cols, start=3):
+                    cells = r.get("cells", {})
+                    cell = ws.cell(row, j, cells.get(str(col), cells.get(col)))
+                    cell.alignment = Alignment(horizontal="right")
+                    if (ti, ri, col) in fixed:
+                        cell.fill = FIXED_FILL
+                        cell.comment = Comment(f"re-read from an enlarged picture; first read as {fixed[(ti, ri, col)]['was']}", "SGX Financials")
+                    elif (ti, ri) in doubt:
+                        cell.fill = DOUBT_FILL
+                if (ti, ri) in doubt:
+                    ws.cell(row, 2).fill = DOUBT_FILL
+        for why in e.get("doubtful", []):
+            ws.append(["", f"Doesn't add up: {why}"])
+            ws.cell(ws.max_row, 2).font = Font(color="9C5700")
 
 
 def _write_sources(ws, records, formats=None):

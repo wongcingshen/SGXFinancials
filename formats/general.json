@@ -524,13 +524,14 @@
     {
      "key": "cf_borrowings_proceeds",
      "label": "Proceeds from Borrowings",
-     "kind": "item"
+     "kind": "item",
+     "hint": "Proceeds from borrowings, bonds, debentures and subordinated debt issued"
     },
     {
      "key": "cf_borrowings_repaid",
      "label": "Repayment of Borrowings",
      "kind": "item",
-     "hint": "Negative"
+     "hint": "Repayment of borrowings, redemption of bonds / debentures / subordinated debt; negative"
     },
     {
      "key": "cf_lease_payments",
@@ -542,13 +543,13 @@
      "key": "cf_interest_paid_fin",
      "label": "Interest Paid (Financing)",
      "kind": "item",
-     "hint": "Negative"
+     "hint": "Interest paid in financing activities, incl. interest on bonds / subordinated debt; negative"
     },
     {
      "key": "cf_dividends_paid",
      "label": "Dividends Paid",
      "kind": "item",
-     "hint": "To owners and non-controlling interests combined; negative"
+     "hint": "To owners and non-controlling interests combined (incl. dividend tax); negative"
     },
     {
      "key": "cf_share_issue",
@@ -564,7 +565,8 @@
     {
      "key": "cf_other_financing",
      "label": "Other Financing Activities",
-     "kind": "item"
+     "kind": "item",
+     "hint": "Other financing flows (e.g. minority interest contributions)"
     },
     {
      "key": "cf_net_financing",

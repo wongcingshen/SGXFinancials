@@ -1,0 +1,905 @@
+{
+ "tables": [
+  {
+   "page": 16,
+   "title": "",
+   "unit": "₹ in Lakhs",
+   "basis": "consolidated",
+   "columns": [
+    {
+     "col": 1,
+     "heading": "30 Sep 2026",
+     "period_end": "2026-09-30",
+     "months": 0
+    },
+    {
+     "col": 2,
+     "heading": "30 Sep 2025",
+     "period_end": "2025-09-30",
+     "months": 0
+    },
+    {
+     "col": 3,
+     "heading": "31 Mar 2026",
+     "period_end": "2026-03-31",
+     "months": 0
+    }
+   ],
+   "rows": [
+    {
+     "ref": "",
+     "label": "CAPITAL and LIABILITIES",
+     "cells": []
+    },
+    {
+     "ref": "",
+     "label": "Capital",
+     "cells": [
+      {
+       "col": 1,
+       "text": "103553"
+      },
+      {
+       "col": 2,
+       "text": "103553"
+      },
+      {
+       "col": 3,
+       "text": "103553"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Reserves and Surplus",
+     "cells": [
+      {
+       "col": 1,
+       "text": "17374569"
+      },
+      {
+       "col": 2,
+       "text": "15785953"
+      },
+      {
+       "col": 3,
+       "text": "16483255"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Minority Interest",
+     "cells": [
+      {
+       "col": 1,
+       "text": "158935"
+      },
+      {
+       "col": 2,
+       "text": "135531"
+      },
+      {
+       "col": 3,
+       "text": "149811"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Deposits",
+     "cells": [
+      {
+       "col": 1,
+       "text": "177509644"
+      },
+      {
+       "col": 2,
+       "text": "152520392"
+      },
+      {
+       "col": 3,
+       "text": "167589511"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Borrowings",
+     "cells": [
+      {
+       "col": 1,
+       "text": "18347136"
+      },
+      {
+       "col": 2,
+       "text": "14824661"
+      },
+      {
+       "col": 3,
+       "text": "17029659"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Other Liabilities and Provisions",
+     "cells": [
+      {
+       "col": 1,
+       "text": "9652886"
+      },
+      {
+       "col": 2,
+       "text": "7985643"
+      },
+      {
+       "col": 3,
+       "text": "8794396"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "TOTAL",
+     "cells": [
+      {
+       "col": 1,
+       "text": "223146723"
+      },
+      {
+       "col": 2,
+       "text": "191355733"
+      },
+      {
+       "col": 3,
+       "text": "210150185"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "ASSETS",
+     "cells": []
+    },
+    {
+     "ref": "",
+     "label": "Cash and Balances with Reserve Bank of India",
+     "cells": [
+      {
+       "col": 1,
+       "text": "5631446"
+      },
+      {
+       "col": 2,
+       "text": "5199416"
+      },
+      {
+       "col": 3,
+       "text": "6468597"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Balances with Banks and Money at Call and Short Notice",
+     "cells": [
+      {
+       "col": 1,
+       "text": "7747689"
+      },
+      {
+       "col": 2,
+       "text": "7539396"
+      },
+      {
+       "col": 3,
+       "text": "9613715"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Investments",
+     "cells": [
+      {
+       "col": 1,
+       "text": "50221440"
+      },
+      {
+       "col": 2,
+       "text": "43373333"
+      },
+      {
+       "col": 3,
+       "text": "43577760"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Advances",
+     "cells": [
+      {
+       "col": 1,
+       "text": "152454715"
+      },
+      {
+       "col": 2,
+       "text": "128705860"
+      },
+      {
+       "col": 3,
+       "text": "144045829"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Fixed Assets",
+     "cells": [
+      {
+       "col": 1,
+       "text": "1201365"
+      },
+      {
+       "col": 2,
+       "text": "1232190"
+      },
+      {
+       "col": 3,
+       "text": "1219705"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Other Assets",
+     "cells": [
+      {
+       "col": 1,
+       "text": "5798990"
+      },
+      {
+       "col": 2,
+       "text": "5214460"
+      },
+      {
+       "col": 3,
+       "text": "5133501"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Goodwill on Consolidation",
+     "cells": [
+      {
+       "col": 1,
+       "text": "91078"
+      },
+      {
+       "col": 2,
+       "text": "91078"
+      },
+      {
+       "col": 3,
+       "text": "91078"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "TOTAL",
+     "cells": [
+      {
+       "col": 1,
+       "text": "223146723"
+      },
+      {
+       "col": 2,
+       "text": "191355733"
+      },
+      {
+       "col": 3,
+       "text": "210150185"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "page": 16,
+   "title": "",
+   "unit": "₹ in Lakhs",
+   "basis": "consolidated",
+   "columns": [
+    {
+     "col": 1,
+     "heading": "H1 2026",
+     "period_end": "2026-09-30",
+     "months": 6
+    },
+    {
+     "col": 2,
+     "heading": "H1 2025",
+     "period_end": "2025-09-30",
+     "months": 6
+    },
+    {
+     "col": 3,
+     "heading": "FY 2026",
+     "period_end": "2026-03-31",
+     "months": 12
+    }
+   ],
+   "rows": [
+    {
+     "ref": "",
+     "label": "A. Cash flow from operating activities:",
+     "cells": []
+    },
+    {
+     "ref": "",
+     "label": "Net Profit before taxes",
+     "cells": [
+      {
+       "col": 1,
+       "text": "1178175"
+      },
+      {
+       "col": 2,
+       "text": "1204518"
+      },
+      {
+       "col": 3,
+       "text": "2531396"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Adjustments for:",
+     "cells": []
+    },
+    {
+     "ref": "",
+     "label": "Depreciation on fixed assets",
+     "cells": [
+      {
+       "col": 1,
+       "text": "94887"
+      },
+      {
+       "col": 2,
+       "text": "97854"
+      },
+      {
+       "col": 3,
+       "text": "196330"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Depreciation on investments (including on Matured debentures)",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(48787)"
+      },
+      {
+       "col": 2,
+       "text": "(22905)"
+      },
+      {
+       "col": 3,
+       "text": "8347"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Bad debts written-off/Provision in respect of non-performing assets",
+     "cells": [
+      {
+       "col": 1,
+       "text": "349742"
+      },
+      {
+       "col": 2,
+       "text": "277640"
+      },
+      {
+       "col": 3,
+       "text": "630855"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Provision for Standard Assets",
+     "cells": [
+      {
+       "col": 1,
+       "text": "14937"
+      },
+      {
+       "col": 2,
+       "text": "84118"
+      },
+      {
+       "col": 3,
+       "text": "123989"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Provision for Other items (Net)",
+     "cells": [
+      {
+       "col": 1,
+       "text": "862638"
+      },
+      {
+       "col": 2,
+       "text": "182525"
+      },
+      {
+       "col": 3,
+       "text": "367145"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "(Profit)/loss on sale of fixed assets (Net)",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(253)"
+      },
+      {
+       "col": 2,
+       "text": "(530)"
+      },
+      {
+       "col": 3,
+       "text": "(1183)"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Payment/provision for interest on bonds",
+     "cells": [
+      {
+       "col": 1,
+       "text": "196558"
+      },
+      {
+       "col": 2,
+       "text": "175846"
+      },
+      {
+       "col": 3,
+       "text": "346263"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Sub total",
+     "cells": [
+      {
+       "col": 1,
+       "text": "2647897"
+      },
+      {
+       "col": 2,
+       "text": "1999064"
+      },
+      {
+       "col": 3,
+       "text": "4203142"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Adjustments for:",
+     "cells": []
+    },
+    {
+     "ref": "",
+     "label": "(Increase)/Decrease in investments",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(6541186)"
+      },
+      {
+       "col": 2,
+       "text": "(448475)"
+      },
+      {
+       "col": 3,
+       "text": "(672106)"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "(Increase)/Decrease in advances",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(8758627)"
+      },
+      {
+       "col": 2,
+       "text": "(5259460)"
+      },
+      {
+       "col": 3,
+       "text": "(20952645)"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "(Increase)/Decrease in other assets",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(197850)"
+      },
+      {
+       "col": 2,
+       "text": "(51874)"
+      },
+      {
+       "col": 3,
+       "text": "(82494)"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Increase/(Decrease) in borrowings",
+     "cells": [
+      {
+       "col": 1,
+       "text": "304576"
+      },
+      {
+       "col": 2,
+       "text": "1417884"
+      },
+      {
+       "col": 3,
+       "text": "2866883"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Increase/(Decrease) in deposits",
+     "cells": [
+      {
+       "col": 1,
+       "text": "9920133"
+      },
+      {
+       "col": 2,
+       "text": "2851596"
+      },
+      {
+       "col": 3,
+       "text": "17919915"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Increase/(Decrease) in other liabilities and provisions",
+     "cells": [
+      {
+       "col": 1,
+       "text": "369907"
+      },
+      {
+       "col": 2,
+       "text": "323297"
+      },
+      {
+       "col": 3,
+       "text": "544502"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Direct taxes paid (Net of Refund)",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(793758)"
+      },
+      {
+       "col": 2,
+       "text": "(393657)"
+      },
+      {
+       "col": 3,
+       "text": "(484585)"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Net cash from operating activities (A)",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(3048906)"
+      },
+      {
+       "col": 2,
+       "text": "438375"
+      },
+      {
+       "col": 3,
+       "text": "3342612"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "B. Cash flow from investing activities:",
+     "cells": []
+    },
+    {
+     "ref": "",
+     "label": "Purchase/ Transfer in of fixed assets",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(85742)"
+      },
+      {
+       "col": 2,
+       "text": "(87043)"
+      },
+      {
+       "col": 3,
+       "text": "(181603)"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Sales/ Transfer out of fixed assets",
+     "cells": [
+      {
+       "col": 1,
+       "text": "9448"
+      },
+      {
+       "col": 2,
+       "text": "20902"
+      },
+      {
+       "col": 3,
+       "text": "30124"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Changes in Trade related investments (Subsidiaries & others)",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(53706)"
+      },
+      {
+       "col": 2,
+       "text": "(163984)"
+      },
+      {
+       "col": 3,
+       "text": "(176033)"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Net cash used in investing activities (B)",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(130000)"
+      },
+      {
+       "col": 2,
+       "text": "(230125)"
+      },
+      {
+       "col": 3,
+       "text": "(327512)"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "C. Cash flow from financing activities:",
+     "cells": []
+    },
+    {
+     "ref": "",
+     "label": "Share Capital/ Share Application Money/ Share Premium",
+     "cells": [
+      {
+       "col": 1,
+       "text": "327"
+      },
+      {
+       "col": 2,
+       "text": "27"
+      },
+      {
+       "col": 3,
+       "text": "279"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Unsecured Subordinated Bonds",
+     "cells": [
+      {
+       "col": 1,
+       "text": "1012899"
+      },
+      {
+       "col": 2,
+       "text": "(174500)"
+      },
+      {
+       "col": 3,
+       "text": "581500"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Dividend paid",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(439566)"
+      },
+      {
+       "col": 2,
+       "text": "(431809)"
+      },
+      {
+       "col": 3,
+       "text": "(431809)"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Payment/provision for interest on bonds",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(107055)"
+      },
+      {
+       "col": 2,
+       "text": "(121705)"
+      },
+      {
+       "col": 3,
+       "text": "(355587)"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Increase/(Decrease) in Minority Interest",
+     "cells": [
+      {
+       "col": 1,
+       "text": "9124"
+      },
+      {
+       "col": 2,
+       "text": "10776"
+      },
+      {
+       "col": 3,
+       "text": "25056"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Net cash from financing activities (C)",
+     "cells": [
+      {
+       "col": 1,
+       "text": "475729"
+      },
+      {
+       "col": 2,
+       "text": "(717211)"
+      },
+      {
+       "col": 3,
+       "text": "(180561)"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Net increase in cash & cash equivalents (A)+(B)+(C)",
+     "cells": [
+      {
+       "col": 1,
+       "text": "(2703177)"
+      },
+      {
+       "col": 2,
+       "text": "(508961)"
+      },
+      {
+       "col": 3,
+       "text": "2834539"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Cash and cash equivalents as at the beginning of the year",
+     "cells": [
+      {
+       "col": 1,
+       "text": "16082312"
+      },
+      {
+       "col": 2,
+       "text": "13247773"
+      },
+      {
+       "col": 3,
+       "text": "13247773"
+      }
+     ]
+    },
+    {
+     "ref": "",
+     "label": "Cash and cash equivalents as at the end of the period",
+     "cells": [
+      {
+       "col": 1,
+       "text": "13379135"
+      },
+      {
+       "col": 2,
+       "text": "12738812"
+      },
+      {
+       "col": 3,
+       "text": "16082312"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

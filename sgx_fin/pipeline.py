@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from . import extractor
+from . import checks, extractor, pictures
 from .page_scanner import ScanResult, page_texts, scan_pdf
 from .sgx_client import Announcement, SGXClient
 
@@ -111,39 +112,110 @@ def choose_financial_pdf(client: SGXClient, links: list[tuple[str, str]], folder
     return best[0], best[1], urls[best[0]], [p.name for p in urls]
 
 
+READ_MAX = 8  # picture pages read in one go; more than this are narrowed down first
+
+
 def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | None = None,
                 model: str | None = None, effort: str = "high",
                 dry_run: bool = False, meta: dict | None = None,
                 cache_dir: Path | None = None, deadline: float | None = None,
                 formats: dict | None = None) -> Result:
+    """Read the statements: the pages given, else the ones the keyword scan picked.
+
+    Pages that are pictures (scans, photos, scans with a hidden OCR layer) go through
+    sgx_fin.pictures: the statement pages are found from small previews when the text couldn't
+    tell, straightened and cleaned up, copied as printed, checked, and doubtful rows re-read; the
+    checked tables then fill the template like a text filing. When parts don't add up to a printed
+    total after that, the template step looks once more with the failing checks pointed out.
+    """
     scan = scan or cached_scan(pdf) or scan_pdf(pdf)
+    manual = bool(pages)
     pages = pages or default_pages(scan)
     result = Result(pdf, scan, pages, meta=dict(meta or {}))
     if dry_run or not pages:
         return result
-    vision = any(p in scan.image_only_pages for p in pages)
+    deadline = deadline or time.monotonic() + 280
+    vision = any(p in scan.picture_pages for p in pages)
     # The AI finds the statements itself when the keyword scan couldn't, or when pages were chosen by hand.
     locate = vision or not scan.found_all or set(pages) != set(scan.all_selected)
-    ex = extractor.extract(pdf, pages, model=model, effort=effort, cache_dir=cache_dir, vision=vision,
-                           locate=locate, deadline=deadline, formats=formats)
-    result.normalised = extractor.normalise(ex.data, formats)
-    result.usage = ex.usage
+    located, reading, turns, context, notes = None, None, {}, "", []
+    if vision:
+        shortlist = scan.vision_pages(cap=40) if (not manual and scan.needs_vision) else pages if len(pages) > READ_MAX else None
+        if shortlist:
+            try:
+                located = pictures.locate(pdf, shortlist, deadline=min(deadline - 120, time.monotonic() + 90), cache_dir=cache_dir)
+            except Exception as e:
+                notes.append(f"Finding the statement pages failed ({e}).")
+            if located:
+                pages, turns, context, locate = located.pages, located.turns, located.context, False
+        if located or len(pages) <= READ_MAX:
+            try:
+                reading = pictures.read(pdf, pages, turns, deadline=deadline - 25, cache_dir=cache_dir)
+            except Exception as e:
+                notes.append(f"Copying the tables from the pictures failed ({e}); read them directly instead.")
+            if reading and not reading.tables:
+                notes.append("No tables were copied from the pictures; read them directly instead.")
+                reading = None
+    result.pages = pages
+
+    def run(recheck: str = ""):
+        if reading:
+            return extractor.extract_text(pdf, reading.pages, pictures.as_text(reading.tables), model=model, effort=effort,
+                                          cache_dir=cache_dir, deadline=deadline, formats=formats, recheck=recheck)
+        return extractor.extract(pdf, pages, model=model, effort=effort, cache_dir=cache_dir, vision=vision,
+                                 locate=locate, deadline=deadline, formats=formats, context=context, recheck=recheck)
+
+    ex = run()
+    normalised = extractor.normalise(ex.data, formats)
+    usage = dict(ex.usage)
+    if reading:
+        pictures._add_usage(usage, reading.usage)
+
+    # Totals that don't add up: one more look, pointed at the failing lines (from the copied tables
+    # for pictures, which is quick; from the pages otherwise).
+    fails = checks.failures(normalised)
+    rechecked = None
+    if fails and deadline - time.monotonic() > (40 if reading else 70):
+        factor = extractor.UNIT_FACTORS.get(ex.data.get("unit") or extractor.DEFAULT_UNIT, 1000) / extractor.T.OUTPUT_UNIT
+        try:
+            ex2 = run(checks.describe(fails, normalised, factor))
+            fixed = checks.reconcile(normalised, extractor.normalise(ex2.data, formats))
+            pictures._add_usage(usage, ex2.usage)
+            rechecked = {"failed": len(fails), "fixed": fixed, "still_failing": len(checks.failures(normalised))}
+        except Exception as e:
+            notes.append(f"A second look at the failing checks failed: {e}")
+
+    def found(st: str) -> list[int]:
+        nums = [n for n in (ex.data.get(st) or {}).get("page_numbers", []) if isinstance(n, int)]
+        if reading:  # the template step was told the original page numbers
+            return sorted({n for n in nums if n in reading.pages})
+        return sorted({pages[n - 1] for n in nums if 1 <= n <= len(pages)})
+
+    result.normalised = normalised
+    result.usage = usage
     result.meta.update({
         "company_name": result.meta.get("company_name") or ex.data.get("company_name", ""),
         "currency": ex.data.get("currency", ""),
+        "unit": ex.data.get("unit", ""),
         "basis": ex.data.get("basis", ""),
         "format": result.normalised["income_statement"]["format"],
-        "notes": ex.data.get("notes", ""),
+        "notes": " ".join([ex.data.get("notes", ""), *notes]).strip(),
         "source_pdf": pdf.name,
         "pages": ",".join(map(str, pages)),
-        "model": ex.model,
+        "model": ex.model if not reading or reading.model == ex.model else f"{reading.model} (copied) + {ex.model}",
         "vision": vision,
-        "located_by_ai": locate,
+        "located_by_ai": locate or bool(located),
         # Where the AI says each statement was, as page numbers of the original PDF.
-        "found_pages": {st: sorted({pages[i - 1] for i in (ex.data.get(st) or {}).get("page_numbers", [])
-                                    if isinstance(i, int) and 1 <= i <= len(pages)})
-                        for st in ("income_statement", "balance_sheet", "cash_flow")},
+        "found_pages": {st: found(st) for st in ("income_statement", "balance_sheet", "cash_flow")},
     })
+    if located:
+        result.meta["located"] = {"model": located.model, "basis": located.basis, "pages": located.pages,
+                                  "found": located.found}
+    if reading:
+        result.meta["pictures"] = reading.summary()
+        result.meta["transcription"] = reading.tables
+    if rechecked:
+        result.meta["rechecked"] = rechecked
     return result
 
 

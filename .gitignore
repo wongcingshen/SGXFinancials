@@ -7,3 +7,6 @@ downloads/
 tests/out/
 *.extract.json
 node_modules/
+*.locate.json
+*.tables.json
+*.map.json

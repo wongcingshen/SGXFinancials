@@ -3,7 +3,8 @@
 Pages are rendered to JPEG and sent to an OpenAI-compatible chat completions endpoint: NVIDIA's API
 catalog for an nvapi- key (the free tier), else Z.ai. A filing with up to GLM_MAX_IMAGES picture
 pages is read in one request; a longer one is first skimmed at low resolution to find the statement
-pages, then only those are read in full.
+pages, then only those are read in full. locate() does the skimming alone, for the two-step reading
+in extractor.
 
 Environment
   GLM_FLASH       the API key (nvapi-... for NVIDIA; GLM_API_KEY / ZAI_API_KEY also work)
@@ -170,10 +171,10 @@ def parse_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
-def _pages_content(urls: list[str], instruction: str) -> list:
+def _pages_content(urls: list[str], instruction: str, labels: list[int] | None = None) -> list:
     content = []
     for i, url in enumerate(urls, 1):
-        content.append({"type": "text", "text": f"Page {i}:"})
+        content.append({"type": "text", "text": f"Page {labels[i - 1] if labels else i}:"})
         content.append({"type": "image_url", "image_url": {"url": url}})
     content.append({"type": "text", "text": instruction})
     return content
@@ -193,6 +194,58 @@ LOCATE = ("Each image is one page of a company's results filing, numbered as lab
           '{"income_statement": [page numbers], "balance_sheet": [...], "cash_flow": [...]} '
           "using the labels' numbers, [] when a statement is not on these pages. Ignore notes, commentary "
           "and segment tables.")
+
+
+LOCATE_JSON = ('\nReturn only JSON: {"pages": [{"page": <number from the label>, "heading": str, '
+               '"statements": ["income_statement" | "balance_sheet" | "cash_flow"], '
+               '"basis": "consolidated" | "standalone" | "unknown"}]}')
+
+
+def locate(pdf: Path, pages: list[int], system: str, instruction: str,
+           deadline: float | None = None) -> tuple[list[dict], str]:
+    """Statement pages among `pages` from small previews, labelled with their own page numbers and
+    skimmed in parallel batches. Returns ([{page, heading, statements, basis}], model)."""
+    size = max_images() * 2
+    batches = [pages[i:i + size] for i in range(0, len(pages), size)]
+    errors = []
+    for model in models():
+        def skim(batch):
+            return _call(model, system, _pages_content(render(pdf, batch, 900), instruction + LOCATE_JSON, batch), deadline)[0]
+        try:
+            found = []
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                for hits in pool.map(skim, batches):
+                    found += [h for h in hits.get("pages") or [] if isinstance(h, dict)]
+            return found, model
+        except GLMError as e:
+            errors.append(f"{model}: {e}")
+            if e.status in (401, 403, 408):
+                break
+        except (ValueError, KeyError, TypeError) as e:
+            errors.append(f"{model}: {e}")
+    raise RuntimeError("; ".join(errors))
+
+
+def ask(system: str, instruction: str, images: list[tuple[str, bytes]] | None = None,
+        deadline: float | None = None) -> tuple[dict, str, dict]:
+    """One JSON question with optional labelled JPEG images. Returns (answer, model, usage)."""
+    errors = []
+    for model in models():
+        content = []
+        for label_text, jpg in images or []:
+            content.append({"type": "text", "text": label_text})
+            content.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpg).decode()}})
+        content.append({"type": "text", "text": instruction})
+        try:
+            answer, usage = _call(model, system, content, deadline)
+            return answer, model, usage
+        except GLMError as e:
+            errors.append(f"{model}: {e}")
+            if e.status in (401, 403, 408):
+                break
+        except (ValueError, KeyError, TypeError) as e:
+            errors.append(f"{model}: {e}")
+    raise RuntimeError("; ".join(errors))
 
 
 # ------------------------------------------------------------------ extraction
@@ -250,22 +303,29 @@ def _add(total: dict, usage: dict) -> None:
 
 
 # ------------------------------------------------------------------ cleaning GLM's JSON
-NUM = re.compile(r"^\(?-?[\d,]*\.?\d+\)?$")
+NUM = re.compile(r"^\(?-?[\d,]*\.?\d+\)?-?$")
+NIL = {"", "-", "--", "–", "—", "n/a", "na", "nil", "?", "x"}
 
 
 def number(v):
-    """12,345 / (12,345) / "-" / "" / None -> float or None."""
+    """A printed figure as a float, or None for blanks, dashes and unreadable cells.
+
+    12,345 · (12,345) · −12,345 · 12,345- · 12,34,567 (Indian grouping) · 12 345 · ₹ 1,234 · S$1,234
+    · 1.234.567 or 1.234,5 (dots for thousands) · "-" / "nil" / "?" -> None."""
     if v is None or isinstance(v, bool):
         return None
     if isinstance(v, (int, float)):
         return float(v)
-    s = str(v).strip().replace("−", "-").replace(" ", "")
-    if s in ("", "-", "–", "—", "n/a", "N/A", "nil", "NIL"):
+    s = str(v).strip().replace("−", "-").replace("–", "-").replace("\u2009", "").replace("\xa0", "")
+    s = re.sub(r"^(?:[A-Z]{0,3}\$|₹|Rs\.?|RMB|US\$|S\$|¥|€|£)\s*", "", s, flags=re.I).replace(" ", "")
+    if s.lower() in NIL:
         return None
+    if re.fullmatch(r"\(?-?\d{1,3}(?:\.\d{3}){2,}(?:,\d+)?\)?|\(?-?\d{1,3}(?:\.\d{3})+,\d+\)?", s):
+        s = s.replace(".", "").replace(",", ".")  # 1.234.567 / 1.234,56
     if not NUM.match(s):
         return None
-    neg = s.startswith("(") and s.endswith(")")
-    s = s.strip("()").replace(",", "")
+    neg = (s.startswith("(") and s.endswith(")")) or s.startswith("-") or (s.endswith("-") and len(s) > 1)
+    s = s.strip("()").strip("-").replace(",", "")
     try:
         x = float(s)
     except ValueError:
