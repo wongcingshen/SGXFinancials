@@ -239,6 +239,7 @@ SGX's terms of use apply to the data you retrieve; keep request volumes modest.
 
 ```bash
 python tests/test_offline.py               # scanner, pictures, checks, schema, Excel merge
+python tests/accuracy.py 2V6B.xlsx          # score a workbook against tests/answers/ (Bank of Baroda by default)
 CHROME_PATH=/path/to/chrome node tests/browse_test.mjs   # browser scraper vs a stand-in SGX site
 NODE_PATH=$(npm root -g) node tests/make_sample_pdf.cjs   # regenerate the sample PDF (needs playwright)
 ```

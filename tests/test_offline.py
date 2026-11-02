@@ -681,6 +681,43 @@ def test_picture_filing_end_to_end():
                 os.environ[k] = v
 
 
+def test_accuracy_scorer_and_answer_key():
+    """A perfect reading of Bank of Baroda scores 100% against the answer key; the old run's
+    workbook pattern (gross Total Income, a row slip) is scored as wrong."""
+    import tempfile
+    from accuracy import score
+
+    key = json.loads((HERE / "answers" / "bank_of_baroda_2026q2.json").read_text())
+    data = {"company_name": "BANK OF BARODA", "format": "bank", "currency": "INR", "unit": "lakhs", "basis": "Group", "notes": ""}
+    for st in ("income_statement", "balance_sheet", "cash_flow"):
+        lines = [l for l in key["lines"] if l["statement"] == st]
+        periods = list(dict.fromkeys((l["period_end"], l["months"]) for l in lines))
+        rows = {}
+        for l in lines:
+            if l["value"] is not None:
+                rows.setdefault(l["key"].split("+")[0], {})[periods.index((l["period_end"], l["months"])) + 1] = l["value"]
+        data[st] = {"page_numbers": [1], "periods": [{"col": i, "label": e, "period_end": e, "months": m} for i, (e, m) in enumerate(periods, 1)],
+                    "rows": [{"key": k, "source_label": k, "cells": [{"col": c, "value": v} for c, v in cells.items()]} for k, cells in rows.items()]}
+    with tempfile.TemporaryDirectory() as d:
+        perfect = Path(d) / "perfect.xlsx"
+        perfect.write_bytes(workbook_bytes(None, extractor.normalise(data), {"company_name": "BANK OF BARODA", "format": "bank"})[0])
+        s = score(perfect, key)
+        assert s["counts"]["correct"] == len(key["lines"]), [r for r in s["results"] if r["status"] != "correct"][:3]
+
+        # The old mistakes: gross 'Total Income' as total operating income (now netted by the program),
+        # and Operating Expenses taken from the row above (still wrong: only a re-read fixes that).
+        for r in data["income_statement"]["rows"]:
+            if r["key"] == "total_operating_income":
+                r["cells"] = [{"col": c["col"], "value": c["value"] + abs(next(x for x in data["income_statement"]["rows"] if x["key"] == "interest_expense")["cells"][i]["value"])}
+                              for i, c in enumerate(r["cells"])]
+            if r["key"] == "total_operating_expenses":
+                r["cells"][5]["value"] = -2877332
+        old = Path(d) / "old.xlsx"
+        old.write_bytes(workbook_bytes(None, extractor.normalise(data), {"company_name": "BANK OF BARODA", "format": "bank"})[0])
+        wrong = [(r["key"], r["months"]) for r in score(old, key)["results"] if r["status"] != "correct"]
+        assert wrong == [("total_operating_expenses", 12)], wrong
+
+
 def test_gemini_steps_down_from_settings_a_model_rejects():
     from google.genai import errors
 

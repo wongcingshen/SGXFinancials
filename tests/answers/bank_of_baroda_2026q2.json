@@ -1,0 +1,1625 @@
+{
+ "company": "BANK OF BARODA",
+ "filing": "Un-Audited Consolidated Financial Results, quarter / half year ended 30 September 2026",
+ "source": "SESGXFINAL.pdf pages 14 and 16 (consolidated), figures as printed; every printed total, sub-item sum and quarter + quarter = half year holds",
+ "unit": "lakhs",
+ "eps_unit": "paise",
+ "format": "bank",
+ "rules": "value null = the line should be blank (0 also accepted). Keys joined with + are scored on their sum. EPS is not rescaled.",
+ "lines": [
+  {
+   "statement": "income_statement",
+   "key": "interest_income",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 3702059.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "interest_income",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 3511452.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "interest_income",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 3331824.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "interest_income",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 7213511.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "interest_income",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 6618455.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "interest_income",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 13429812.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "interest_expense",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": -2266048.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "interest_expense",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": -2130113.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "interest_expense",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": -2019135.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "interest_expense",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -4396161.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "interest_expense",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -4049789.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "interest_expense",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -8185993.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "net_interest_income",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 1436011.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "net_interest_income",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 1381339.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "net_interest_income",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 1312689.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "net_interest_income",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 2817350.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "net_interest_income",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 2568666.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "net_interest_income",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 5243819.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_non_interest_income",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 876312.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_non_interest_income",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 620219.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_non_interest_income",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 511586.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_non_interest_income",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 1496531.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_non_interest_income",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 1065371.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_non_interest_income",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 2252732.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_income",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 2312323.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_income",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 2001558.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_income",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 1824275.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_income",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 4313881.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_income",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 3634037.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_income",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 7496551.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "staff_costs",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": -496808.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "staff_costs",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": -461134.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "staff_costs",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": -441150.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "staff_costs",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -957942.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "staff_costs",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -908336.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "staff_costs",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -1720852.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_operating_expenses_bank",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": -548098.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_operating_expenses_bank",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": -482030.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_operating_expenses_bank",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": -533847.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_operating_expenses_bank",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -1030128.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_operating_expenses_bank",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -1017860.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "other_operating_expenses_bank",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -2150892.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_expenses",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": -1044906.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_expenses",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": -943164.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_expenses",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": -974997.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_expenses",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -1988070.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_expenses",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -1926196.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "total_operating_expenses",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -3871744.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "operating_profit_pre_provisions",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 1267417.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "operating_profit_pre_provisions",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 1058394.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "operating_profit_pre_provisions",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 849278.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "operating_profit_pre_provisions",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 2325811.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "operating_profit_pre_provisions",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 1707841.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "operating_profit_pre_provisions",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 3624807.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "allowances",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": -340689.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "allowances",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": -269817.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "allowances",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": -179781.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "allowances",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -610506.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "allowances",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -521378.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "allowances",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -1130338.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "exceptional_items",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "exceptional_items",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": -568023.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "exceptional_items",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "exceptional_items",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -568023.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "exceptional_items",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "exceptional_items",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_before_tax",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 926728.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_before_tax",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 220554.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_before_tax",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 669497.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_before_tax",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 1147282.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_before_tax",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 1186463.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_before_tax",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 2494469.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "tax",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": -262823.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "tax",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": -63295.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "tax",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": -162467.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "tax",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -326118.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "tax",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -344245.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "tax",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -546753.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_after_tax",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 663905.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_after_tax",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 157259.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_after_tax",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 507030.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_after_tax",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 821164.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_after_tax",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 842218.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "profit_after_tax",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 1947716.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates_after_tax",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 15332.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates_after_tax",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 26667.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates_after_tax",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 11033.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates_after_tax",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 41999.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates_after_tax",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 27563.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates_after_tax",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 59310.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_minority",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 5509.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_minority",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 5597.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_minority",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 4707.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_minority",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 11106.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_minority",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 9509.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_minority",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 22384.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_shareholders",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 673728.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_shareholders",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 178329.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_shareholders",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 513356.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_shareholders",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 852057.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_shareholders",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 860272.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "pat_shareholders",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 1984642.0
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_basic",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 1303
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_basic",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 345
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_basic",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 993
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_basic",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 1648
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_basic",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 1664
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_basic",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 3838
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_diluted",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": 1303
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_diluted",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": 345
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_diluted",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": 993
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_diluted",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 1648
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_diluted",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 1664
+  },
+  {
+   "statement": "income_statement",
+   "key": "eps_diluted",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 3838
+  },
+  {
+   "statement": "income_statement",
+   "key": "fee_income",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "fee_income",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "fee_income",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "fee_income",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "fee_income",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "fee_income",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates",
+   "period_end": "2026-09-30",
+   "months": 3,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates",
+   "period_end": "2026-06-30",
+   "months": 3,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates",
+   "period_end": "2025-09-30",
+   "months": 3,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": null
+  },
+  {
+   "statement": "income_statement",
+   "key": "share_associates",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": null
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "share_capital",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 103553.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "share_capital",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 103553.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "share_capital",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 103553.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "reserves",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 17374569.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "reserves",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 15785953.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "reserves",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 16483255.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "minority_interests",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 158935.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "minority_interests",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 135531.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "minority_interests",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 149811.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "customer_deposits",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 177509644.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "customer_deposits",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 152520392.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "customer_deposits",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 167589511.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "bank_borrowings",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 18347136.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "bank_borrowings",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 14824661.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "bank_borrowings",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 17029659.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "other_liabilities",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 9652886.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "other_liabilities",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 7985643.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "other_liabilities",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 8794396.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "total_assets",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 223146723.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "total_assets",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 191355733.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "total_assets",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 210150185.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "cash_central_bank",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 5631446.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "cash_central_bank",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 5199416.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "cash_central_bank",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 6468597.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "due_from_banks",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 7747689.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "due_from_banks",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 7539396.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "due_from_banks",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 9613715.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "bank_investments",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 50221440.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "bank_investments",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 43373333.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "bank_investments",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 43577760.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "loans_advances",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 152454715.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "loans_advances",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 128705860.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "loans_advances",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 144045829.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "ppe",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 1201365.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "ppe",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 1232190.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "ppe",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 1219705.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "other_assets",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 5890068.0,
+   "also_accept": [
+    5798990.0
+   ]
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "other_assets",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 5305538.0,
+   "also_accept": [
+    5214460.0
+   ]
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "other_assets",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 5224579.0,
+   "also_accept": [
+    5133501.0
+   ]
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "total_liabilities",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 205509666.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "total_liabilities",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 175330696.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "total_liabilities",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 193413566.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "shareholders_equity",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 17478122.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "shareholders_equity",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 15889506.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "shareholders_equity",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 16586808.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "total_equity",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": 17637057.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "total_equity",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": 16025037.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "total_equity",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": 16736619.0
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "due_to_banks",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": null
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "due_to_banks",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": null
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "due_to_banks",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": null
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "perpetual_securities",
+   "period_end": "2026-09-30",
+   "months": 0,
+   "value": null
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "perpetual_securities",
+   "period_end": "2025-09-30",
+   "months": 0,
+   "value": null
+  },
+  {
+   "statement": "balance_sheet",
+   "key": "perpetual_securities",
+   "period_end": "2026-03-31",
+   "months": 0,
+   "value": null
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_pbt",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 1178175.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_pbt",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 1204518.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_pbt",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 2531396.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_dep_amort",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 94887.0,
+   "also_accept": [
+    46100.0
+   ]
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_dep_amort",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 97854.0,
+   "also_accept": [
+    74949.0
+   ]
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_dep_amort",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 196330.0,
+   "also_accept": [
+    204677.0
+   ]
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_op_before_wc",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 2647897.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_op_before_wc",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 1999064.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_op_before_wc",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 4203142.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_tax_paid",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -793758.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_tax_paid",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -393657.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_tax_paid",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -484585.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_operating",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -3048906.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_operating",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 438375.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_operating",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 3342612.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_capex",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -85742.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_capex",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -87043.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_capex",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -181603.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_disposal_ppe",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 9448.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_disposal_ppe",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 20902.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_disposal_ppe",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 30124.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_investing",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -130000.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_investing",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -230125.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_investing",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -327512.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_share_issue",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 327.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_share_issue",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 27.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_share_issue",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 279.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_borrowings_proceeds+cf_borrowings_repaid",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 1012899.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_borrowings_proceeds+cf_borrowings_repaid",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -174500.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_borrowings_proceeds+cf_borrowings_repaid",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 581500.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_dividends_paid",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -439566.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_dividends_paid",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -431809.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_dividends_paid",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -431809.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_interest_paid_fin",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -107055.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_interest_paid_fin",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -121705.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_interest_paid_fin",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -355587.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_financing",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 475729.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_financing",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -717211.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_financing",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": -180561.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_change",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": -2703177.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_change",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": -508961.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_net_change",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 2834539.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_cash_begin",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 16082312.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_cash_begin",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 13247773.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_cash_begin",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 13247773.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_cash_end",
+   "period_end": "2026-09-30",
+   "months": 6,
+   "value": 13379135.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_cash_end",
+   "period_end": "2025-09-30",
+   "months": 6,
+   "value": 12738812.0
+  },
+  {
+   "statement": "cash_flow",
+   "key": "cf_cash_end",
+   "period_end": "2026-03-31",
+   "months": 12,
+   "value": 16082312.0
+  }
+ ]
+}
