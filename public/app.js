@@ -175,7 +175,7 @@ function filesLine(a) {
   return `<span class="files">${icon("file", "width:14px;height:14px")}<span>${a.attachments.length} PDF${a.attachments.length === 1 ? "" : "s"}: ${a.attachments.map(link).join(", ")}</span></span>`;
 }
 
-const BUSY = { queued: "Queued", reading: "Reading PDF…", ai: () => `${state.ai} reading…` };
+const BUSY = { queued: "Queued", reading: "Reading PDF…", asking: "Photos: your choice…", ai: () => `${state.ai} reading…` };
 
 function cardHtml(a, i) {
   const j = a.job;
@@ -186,6 +186,7 @@ function cardHtml(a, i) {
   const pill = j.status === "done" ? `${icon("check", "width:14px;height:14px")}Excel ready`
     : j.status === "failed" ? `${icon("alert", "width:14px;height:14px")}Failed`
     : j.status === "skipped" ? `${icon("x", "width:14px;height:14px")}Not results`
+    : j.status === "claude" ? `${icon("sparkles", "width:14px;height:14px")}Reading in Claude`
     : busy ? `<span class="spin" aria-hidden="true"></span>${esc(label)}${j.since ? ` <span class="elapsed" data-since="${j.since}">${clock(j.since)}</span>` : ""}`
     : `<span class="dot"></span>${esc(when(a.broadcast) || "SGX")}`;
   const action = j.status === "done"
@@ -193,12 +194,15 @@ function cardHtml(a, i) {
     : busy
       ? `<button type="button" class="btn btn-ember" disabled><span class="spin" aria-hidden="true"></span>${esc(label)}</button>`
       : j.status === "skipped" ? `<button type="button" class="btn btn-outline" data-details="${i}">${icon("eye")}Why skipped</button>`
+      : j.status === "claude" ? `<button type="button" class="btn btn-ember" data-claude="${i}">${icon("sparkles")}Open in Claude</button>
+        <button type="button" class="btn btn-outline" data-gemini="${i}" title="Read it here with ${esc(state.ai)} instead">Use ${esc(state.ai)}</button>`
       : `<button type="button" class="btn ${a.kind === "other" ? "btn-outline" : "btn-ember"}" data-extract="${i}">${icon("sparkles")}${j.status === "failed" ? "Try again" : "Extract"}</button>`;
   const saved = j.saved ? ` · ${j.merged ? "merged into" : "saved to"} folder` : j.saveError ? " · not saved to folder" : "";
   const status = j.status === "done"
     ? `<span class="card-note ${fail ? "bad" : ""}">${pass} checks pass${fail ? `, ${fail} fail` : ""}${saved}</span>`
     : j.status === "failed" ? `<span class="card-note bad" title="${esc(j.error)}">${esc(j.error)}</span>`
     : j.status === "skipped" ? `<span class="card-note muted" title="${esc(j.error)}">${esc(j.error)}</span>`
+    : j.status === "claude" ? `<span class="card-note muted" title="The Excel link arrives in the Claude chat">Sent to Claude ${esc(CLAUDE_MODEL)} · Excel link in the chat</span>`
     : a.reason ? `<span class="card-note muted" title="${esc(a.reason)}">${esc(a.reason)}</span>` : "";
   const hasDetails = j.scan || j.result || j.error;
   const name = esc(nameCase(a.issuer) || a.fileName || "Unknown issuer");
@@ -517,6 +521,17 @@ async function extract(a, { pages } = {}) {
       }
     }
     if (!scanRes.pages.length) throw new Error("The keyword scan found no statement pages. Open the details to choose pages.");
+    // Statements that are photos: offer Claude (it reads them itself through the connector).
+    if (scanRes.scan.vision && a.url && !a.file && a.readWith !== "gemini") {
+      j.status = "asking";
+      j.since = Date.now();
+      renderCard(a);
+      if ((await askReader(a)) === "claude") {
+        Object.assign(j, { status: "claude", since: null });
+        renderCard(a);
+        return;
+      }
+    }
     j.ai = state.ai;
     j.status = "ai";
     j.since = Date.now();
@@ -894,6 +909,77 @@ $("#screenForm").addEventListener("submit", screen);
 $("#openDirect").addEventListener("click", () => openSheet("#directSheet"));
 $("#openSettings").addEventListener("click", () => openSheet("#settingsSheet"));
 
+// ------------------------------------------------------------------ photo filings: Gemini or Claude?
+// When the scan finds the statements are photos, a small window offers to read them with Claude
+// instead. One window at a time (Extract all can find several); no answer in 30 s keeps Gemini.
+const CLAUDE_MODEL = "Opus 5.5";
+const ASK_SECONDS = 30;
+let askChain = Promise.resolve();
+
+function claudePrompt(a) {
+  const used = a.job.scan?.scan?.used_url;
+  return [
+    "Use the SGX Financials connector to read this SGX results filing. Its financial statements are photos/scans, "
+      + "so read the page images yourself (open_filing, then submit_statements), re-read any lines whose checks fail, "
+      + "and give me the Excel download link.",
+    `Company: ${nameCase(a.issuer) || "?"}${a.stock_code ? ` (${a.stock_code})` : ""}`,
+    a.title ? `Filing: ${shortTitle(a.title)}` : "",
+    `Announcement: ${a.url}`,
+    used && used !== a.url ? `Results PDF: ${used}` : "",
+  ].filter(Boolean).join("\n");
+}
+function openClaudeChat(a) {
+  const url = `https://claude.ai/new?q=${encodeURIComponent(claudePrompt(a))}`;
+  const win = window.open(url, "_blank");
+  if (win) win.opener = null;
+  else toast("Your browser blocked the Claude tab: allow pop-ups for this site, then click Open in Claude");
+}
+
+function askReader(a) {
+  const run = () => new Promise((resolve) => {
+    const pop = document.createElement("div");
+    pop.className = "ask-pop";
+    pop.setAttribute("role", "alertdialog");
+    pop.setAttribute("aria-labelledby", "askTitle");
+    pop.innerHTML = `
+      <div class="ask-head">${icon("eye")}<b id="askTitle">${esc(nameCase(a.issuer) || "This filing")}: statements are photos</b></div>
+      <p>Read them with <b>Claude ${esc(CLAUDE_MODEL)}</b> instead of ${esc(state.ai)}? A Claude chat opens with the filing; it reads the pages itself and replies with the Excel link.</p>
+      <div class="ask-actions">
+        <button type="button" class="btn btn-ember" data-pick="claude">${icon("sparkles")}Use ${esc(CLAUDE_MODEL)}</button>
+        <button type="button" class="btn btn-outline" data-pick="gemini">Keep ${esc(state.ai)} <span class="ask-count">${ASK_SECONDS}</span></button>
+      </div>
+      <p class="ask-foot">No answer in ${ASK_SECONDS} s keeps ${esc(state.ai)}. Claude needs the SGX Financials connector: <button type="button" class="link-btn" data-pick="setup">Add to Claude</button></p>
+      <div class="ask-bar"><span style="animation-duration:${ASK_SECONDS}s"></span></div>`;
+    document.body.append(pop);
+    const started = Date.now();
+    const tick = setInterval(() => {
+      const left = Math.max(0, ASK_SECONDS - Math.floor((Date.now() - started) / 1000));
+      pop.querySelector(".ask-count").textContent = left;
+    }, 250);
+    const timer = setTimeout(() => done("gemini"), ASK_SECONDS * 1000);
+    const onKey = (e) => { if (e.key === "Escape") done("gemini"); };
+    document.addEventListener("keydown", onKey);
+    function done(choice) {
+      clearTimeout(timer);
+      clearInterval(tick);
+      document.removeEventListener("keydown", onKey);
+      pop.remove();
+      a.readWith = choice;
+      resolve(choice);
+    }
+    pop.addEventListener("click", (e) => {
+      const pick = e.target.closest("[data-pick]")?.dataset.pick;
+      if (pick === "setup") return $("#openClaude").click();
+      if (pick === "claude") openClaudeChat(a); // inside the click, so the new tab isn't blocked
+      if (pick) done(pick);
+    });
+    pop.querySelector('[data-pick="claude"]').focus({ preventScroll: true });
+  });
+  const turn = askChain.then(run);
+  askChain = turn.catch(() => {});
+  return turn;
+}
+
 // ------------------------------------------------------------------ Claude connector (MCP)
 // One click opens Claude's "Add custom connector" dialog with the name and URL filled in (Claude's
 // documented install link: modal=add-custom-connector&connectorName=&connectorUrl=); the user only
@@ -978,11 +1064,13 @@ $("#bulk").addEventListener("click", async (e) => {
 $("#results").addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
-  const i = b.dataset.extract ?? b.dataset.details;
+  const i = b.dataset.extract ?? b.dataset.details ?? b.dataset.claude ?? b.dataset.gemini;
   if (i == null) return;
   const a = state.items[+i];
   if (b.dataset.details != null) return showDetails(a);
-  if (state.bulk) return;
+  if (b.dataset.claude != null) return openClaudeChat(a);
+  if (state.bulk && b.dataset.gemini == null) return;
+  a.readWith = b.dataset.gemini != null ? "gemini" : undefined; // Extract / Try again asks again for photos
   await folderReady();
   extract(a);
 });

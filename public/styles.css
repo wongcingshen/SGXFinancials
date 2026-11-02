@@ -404,3 +404,26 @@ details > summary::-webkit-details-marker { display: none; }
   padding: 12px 18px; border-radius: 14px; background: var(--color-ink); color: #fff; font-size: 14px; font-weight: 500;
   box-shadow: var(--shadow-lift); animation: rise var(--motion-base) var(--ease-enter);
 }
+
+/* ------------------------------------------------------------ photo filing: Gemini or Claude? */
+.ask-pop {
+  position: fixed; right: 20px; bottom: 20px; z-index: 60; width: min(380px, calc(100vw - 32px));
+  background: var(--color-card); color: var(--color-ink); border: 1px solid var(--color-line);
+  border-radius: 18px; box-shadow: var(--shadow-lift); padding: 16px 16px 0; overflow: hidden;
+  animation: rise var(--motion-base) var(--ease-enter);
+}
+.ask-pop p { margin: 8px 0 0; font-size: 14px; line-height: 1.5; }
+.ask-head { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.ask-head .i { color: var(--color-ember-deep); flex-shrink: 0; }
+.ask-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.ask-actions .btn { flex: 1 1 auto; }
+.ask-count {
+  min-width: 26px; height: 22px; padding: 0 6px; border-radius: 99px; background: var(--color-chip);
+  display: inline-grid; place-items: center; font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.ask-pop .ask-foot { font-size: 12.5px; color: var(--color-muted); margin: 10px 0 14px; }
+.ask-pop .link-btn { font-size: inherit; color: var(--color-ember-deep); }
+.ask-bar { height: 4px; margin: 0 -16px; background: var(--color-chip); }
+.ask-bar span { display: block; height: 100%; background: var(--color-ember); transform-origin: left; animation: ask-drain linear forwards; }
+@keyframes ask-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@media (max-width: 560px) { .ask-pop { right: 16px; left: 16px; bottom: 16px; width: auto; } }

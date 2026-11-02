@@ -175,7 +175,11 @@ cropped and contrast-stretched (`sgx_fin/pictures.py`), each as two overlapping 
 digits, plus the same transcription rules and template the server's AI gets. Claude (e.g. Opus 5.5
 in the chat) reads the figures and submits them; the server then rescales, repairs signs, derives
 missing totals, runs the tie-out checks and replies with any failing lines to re-read, and a link to
-the Excel workbook. Long scanned documents come as small previews first so Claude picks the
+the Excel workbook. **In the web app**, when the scan finds a filing's statements are photos, a small window asks
+whether to read them with Claude Opus 5.5 instead. **Use Opus 5.5** opens a new Claude chat with the
+filing already typed in (the connector does the rest and replies with the Excel link); **Keep
+Gemini**, Escape, or 30 seconds without an answer carries on with the server's AI. The card then
+offers **Open in Claude** and **Use Gemini** to change your mind. Long scanned documents come as small previews first so Claude picks the
 statement pages. Text filings still go to the server's AI (`extract_filing`), unless Claude asks
 for them as images.
 
