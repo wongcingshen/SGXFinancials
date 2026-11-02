@@ -161,12 +161,13 @@ python tests/dev_server.py --mock      # demo data; drop --mock for the real thi
 The app is also a remote MCP server, so you can work from a Claude chat (claude.ai, the Claude
 desktop and mobile apps, Claude Code): "screen last Friday's SGX results and put DBS into Excel".
 
-**Add it:** click **Add to Claude** in the header → **Copy link & open Claude** → in Claude's
-Connectors settings click **Add custom connector**, paste the link, **Add**. The link is
-`https://<your-app>/api/mcp?op=mcp&key=<APP_PASSWORD>` (custom connectors can't send a password
-header, so the key travels in the link; keep it private). Claude has no link that fills in the form
-for you, so the paste is the one manual step. On Team/Enterprise plans an owner adds custom
-connectors under Organization settings.
+**Add it:** click **Add to Claude** in the header. Claude opens its **Add custom connector**
+dialog with the name and URL filled in (Claude's install link,
+`https://claude.ai/customize/connectors?modal=add-custom-connector&connectorName=…&connectorUrl=…`);
+click **Continue**. The connector URL is `https://<your-app>/api/mcp?op=mcp&key=<APP_PASSWORD>`
+(custom connectors can't send a password header, so the key travels in the URL; keep it private).
+Enter the app password in Settings first, or the button asks for it. On Team/Enterprise plans an
+owner adds org-wide connectors (same parameters on `claude.ai/admin-settings/connectors`).
 
 **Photo filings are read by Claude.** When the statements are pictures (scans, photos), the
 connector doesn't call Gemini or GLM: it hands Claude the pages, turned upright, straightened,
