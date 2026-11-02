@@ -4,6 +4,8 @@ Routes (the operation is also accepted as ?op=health|screen|process on any path)
   GET  /api/health                    configuration status
   GET  /api/screen?url=...&company=   list announcements for an SGX page URL (token or browser)
   POST /api/process                   scan (+ extract) one filing, return workbook
+  POST /api/mcp?op=mcp&key=...        MCP connector for Claude (sgx_fin/mcp_server.py)
+  GET  /api/download?op=download&d=&s= a workbook from a connector result's signed link
 On Vercel, /api/browse (api/browse.mjs) runs the headless browser for screening and attachments.
 
 Environment variables (Vercel > Project > Settings > Environment Variables)
@@ -32,7 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 from sgx_fin import extractor
 from sgx_fin.excel_writer import workbook_bytes
@@ -304,3 +306,48 @@ def process():
         scan=scan_info, pages=res.pages, extracted=True, meta=res.meta, usage=res.usage, checks=checks, timings=timings,
         filename=f"{name}.xlsx", workbook_b64=base64.b64encode(data).decode(),
     )
+
+
+# ------------------------------------------------------------------ MCP connector for Claude
+def _mcp_authorised() -> bool:
+    pw = os.environ.get("APP_PASSWORD")
+    if not pw:
+        return True
+    auth = request.headers.get("Authorization", "")
+    given = [request.args.get("key", ""), request.headers.get("X-App-Password", ""),
+             auth[7:] if auth.lower().startswith("bearer ") else ""]
+    return any(g and hmac.compare_digest(g, pw) for g in given)
+
+
+@api("mcp", "POST", public=True)  # checks the password itself: Claude passes it as ?key=
+def mcp():
+    """MCP Streamable HTTP endpoint (stateless; every answer is a JSON response)."""
+    from sgx_fin import mcp_server
+    if not _mcp_authorised():
+        return jsonify(jsonrpc="2.0", id=None, error={"code": -32001, "message": "Wrong or missing key"}), 401
+    try:
+        message = json.loads(request.get_data() or b"null")
+    except ValueError:
+        return jsonify(jsonrpc="2.0", id=None, error={"code": -32700, "message": "Parse error"}), 400
+    WORK.mkdir(parents=True, exist_ok=True)
+    proto = request.headers.get("X-Forwarded-Proto", request.scheme)
+    ctx = mcp_server.Context(f"{proto}://{request.host}", WORK, os.environ.get("APP_PASSWORD", ""))
+    reply = mcp_server.handle(message, ctx)
+    if reply is None:  # only notifications
+        return Response(status=202)
+    return Response(json.dumps(reply), mimetype="application/json")
+
+
+@api("download", "GET", public=True)  # the link is signed with APP_PASSWORD instead
+def download():
+    from sgx_fin import mcp_server
+    try:
+        normalised, meta = mcp_server.decode_download(request.args.get("d", ""), request.args.get("s", ""))
+    except PermissionError as e:
+        return jsonify(error=str(e)), 403
+    except Exception:
+        return jsonify(error="This download link is damaged; ask Claude for the link again."), 400
+    data, _ = workbook_bytes(None, normalised, meta)
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", meta.get("stock_code") or meta.get("company_name") or "").strip("_") or "financials"
+    return Response(data, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})

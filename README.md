@@ -156,6 +156,40 @@ python tests/dev_server.py --mock      # demo data; drop --mock for the real thi
 # open http://127.0.0.1:5000
 ```
 
+## Use it from Claude (MCP connector)
+
+The app is also a remote MCP server, so you can work from a Claude chat (claude.ai, the Claude
+desktop and mobile apps, Claude Code): "screen last Friday's SGX results and put DBS into Excel".
+
+**Add it:** click **Add to Claude** in the header → **Copy link & open Claude** → in Claude's
+Connectors settings click **Add custom connector**, paste the link, **Add**. The link is
+`https://<your-app>/api/mcp?op=mcp&key=<APP_PASSWORD>` (custom connectors can't send a password
+header, so the key travels in the link; keep it private). Claude has no link that fills in the form
+for you, so the paste is the one manual step. On Team/Enterprise plans an owner adds custom
+connectors under Organization settings.
+
+**Photo filings are read by Claude.** When the statements are pictures (scans, photos), the
+connector doesn't call Gemini or GLM: it hands Claude the pages, turned upright, straightened,
+cropped and contrast-stretched (`sgx_fin/pictures.py`), each as two overlapping halves for small
+digits, plus the same transcription rules and template the server's AI gets. Claude (e.g. Opus 5.5
+in the chat) reads the figures and submits them; the server then rescales, repairs signs, derives
+missing totals, runs the tie-out checks and replies with any failing lines to re-read, and a link to
+the Excel workbook. Long scanned documents come as small previews first so Claude picks the
+statement pages. Text filings still go to the server's AI (`extract_filing`), unless Claude asks
+for them as images.
+
+| Tool | What it does |
+|---|---|
+| `screen_sgx_results` | A date range's ANNC17 announcements (on Vercel via `/api/browse`) |
+| `open_filing` | Downloads the filing, keyword-scans it (no AI); picture statements → page images + rules |
+| `submit_statements` | Claude's JSON → checks, figures table, Excel link (re-read prompts for failing checks) |
+| `extract_filing` | The web app's own pipeline with the server's AI |
+
+Nothing is stored: the Excel link (`/api/download`) carries the figures compressed and signed with
+`APP_PASSWORD`, and the workbook is built when it is opened. The endpoint is stateless MCP
+Streamable HTTP with JSON responses (`sgx_fin/mcp_server.py`). If Vercel **Deployment Protection**
+is on for production, Claude can't reach the URL: turn it off for production or use a bypass.
+
 ## Deploy to Vercel
 
 1. Import this GitHub repo in Vercel (**Add New → Project**). Framework preset: **Other**. No build settings needed.

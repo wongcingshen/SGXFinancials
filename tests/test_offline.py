@@ -906,6 +906,95 @@ def test_workbook_and_merge():
     (HERE / "out" / "ACME.xlsx").write_bytes(data2)
 
 
+def test_mcp_connector():
+    """The Claude connector: handshake, picture pages handed to Claude, its reading checked and
+    turned into a signed Excel link."""
+    import copy
+    import importlib.util
+    import os
+    import shutil
+    from urllib.parse import urlparse
+    from sgx_fin import mcp_server
+
+    out = HERE / "out" / "mcp"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    pic = picture_pdf(HERE / "sample_results.pdf", out / "photos.pdf")
+    spec = importlib.util.spec_from_file_location("vercel_app_mcp", HERE.parent / "api" / "index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    client = mod.app.test_client()
+    old_pw, old_load = os.environ.get("APP_PASSWORD"), mcp_server.load_filing
+    os.environ["APP_PASSWORD"] = "s3cret"
+    current = {"pdf": pic}
+    mcp_server.load_filing = lambda args, ctx: (current["pdf"], scan_pdf(current["pdf"]), None, [current["pdf"].name])
+    try:
+        def rpc(method, params=None, key="s3cret", mid=1):
+            msg = {"jsonrpc": "2.0", "method": method, **({"id": mid} if mid is not None else {}), "params": params or {}}
+            return client.post(f"/api/mcp?op=mcp&key={key}", json=msg)
+
+        assert rpc("initialize", key="wrong").status_code == 401
+        init = rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t"}}).get_json()
+        assert init["result"]["protocolVersion"] == "2025-06-18" and "pictures" in init["result"]["instructions"].lower()
+        assert rpc("notifications/initialized", mid=None).status_code == 202
+        names = [t["name"] for t in rpc("tools/list").get_json()["result"]["tools"]]
+        assert names == ["screen_sgx_results", "open_filing", "submit_statements", "extract_filing"]
+        assert client.get("/api/mcp?op=mcp&key=s3cret").status_code == 405  # no SSE stream
+
+        call = lambda name, args: rpc("tools/call", {"name": name, "arguments": args}).get_json()["result"]  # noqa: E731
+        url = "https://links.sgx.com/1.0.0/corporate-announcements/TEST"
+        # A photographed filing: Claude first gets small previews to find the statement pages...
+        res = call("open_filing", {"announcement_url": url})
+        images = [c for c in res["content"] if c["type"] == "image"]
+        assert len(images) == 8 and "previews" in res["content"][0]["text"] and not res.get("isError")
+        # ...then the pages it picked, cleaned up, as two halves each, with the rules.
+        res = call("open_filing", {"announcement_url": url, "pages": [1, 2]})
+        assert sum(c["type"] == "image" for c in res["content"]) == 4
+        text = res["content"][0]["text"]
+        assert "TRANSCRIPTION RULES" in text and "submit_statements" in text and "revenue" in text
+        assert call("open_filing", {"announcement_url": url, "pages": [99]}).get("isError")
+        # A text filing goes to the server's AI unless Claude asks for images.
+        current["pdf"] = HERE / "sample_results.pdf"
+        res = call("open_filing", {"announcement_url": url})
+        assert "TEXT" in res["content"][0]["text"] and len(res["content"]) == 1
+
+        # Claude's reading, in the extraction JSON (cells by column).
+        data = copy.deepcopy(FAKE)
+        data["format"] = "general"
+        for st in ("income_statement", "balance_sheet", "cash_flow"):
+            for i, p in enumerate(data[st]["periods"], 1):
+                p["col"] = i
+            for row in data[st]["rows"]:
+                row["cells"] = [{"col": i, "value": v} for i, v in enumerate(row.pop("values"), 1) if v is not None]
+        bad = copy.deepcopy(data)
+        bad["income_statement"]["rows"][0]["key"] = "turnover_typo"
+        assert call("submit_statements", {"extraction": bad}).get("isError")
+        res = call("submit_statements", {"extraction": data, "stock_code": "ACME", "source_pdf": "photos.pdf", "pages": [1, 2, 3]})
+        text = res["content"][0]["text"]
+        assert not res.get("isError") and "Checks:" in text and "| Revenue |" in text and "120,512" in text
+        link = text.split("Excel workbook")[1].split(": ", 1)[1].split()[0]
+        u = urlparse(link)
+        r = client.get(f"{u.path}?{u.query}")
+        assert r.status_code == 200 and r.headers["Content-Disposition"].endswith('ACME.xlsx"')
+        wb = load_workbook(io.BytesIO(r.data))
+        assert wb["Income Statement"]["B1"].value is not None or wb["Income Statement"]["A1"].value
+        assert client.get(f"{u.path}?{u.query.replace('&s=', '&s=0')}").status_code == 403  # tampered signature
+
+        # A misread total comes back with the lines to read again.
+        wrong = copy.deepcopy(data)
+        for row in wrong["balance_sheet"]["rows"]:
+            if row["key"] == "total_assets":
+                row["cells"][0]["value"] += 900
+        text = call("submit_statements", {"extraction": wrong})["content"][0]["text"]
+        assert "FAIL" in text and "total_assets" in text
+    finally:
+        mcp_server.load_filing = old_load
+        if old_pw is None:
+            os.environ.pop("APP_PASSWORD", None)
+        else:
+            os.environ["APP_PASSWORD"] = old_pw
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

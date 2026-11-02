@@ -893,6 +893,41 @@ async function guarded(fn) {
 $("#screenForm").addEventListener("submit", screen);
 $("#openDirect").addEventListener("click", () => openSheet("#directSheet"));
 $("#openSettings").addEventListener("click", () => openSheet("#settingsSheet"));
+
+// ------------------------------------------------------------------ Claude connector (MCP)
+// Claude adds remote MCP servers by URL. Custom connectors can't send our password header, so it
+// travels in the link (?key=), which is why the link is only shown to someone who has the password.
+const CLAUDE_CONNECTORS = "https://claude.ai/settings/connectors";
+function connectorUrl() {
+  const pw = store.get("sgxf-pw");
+  const base = `${location.origin}/api/mcp?op=mcp`;
+  return pw ? `${base}&key=${encodeURIComponent(pw)}` : base;
+}
+async function copyConnector() {
+  const url = connectorUrl();
+  try { await navigator.clipboard.writeText(url); return true; }
+  catch { $("#mcpUrl").select(); return document.execCommand?.("copy") ?? false; }
+}
+$("#openClaude").addEventListener("click", () => {
+  const needPw = state.health?.password_required && !store.get("sgxf-pw");
+  $("#mcpUrl").value = connectorUrl();
+  $("#mcpHelp").innerHTML = needPw
+    ? `<b style="color:var(--color-ember-deep)">This app has a password.</b> Enter it in Settings first so the link includes it.`
+    : state.health?.password_required
+      ? "The link contains your app password: keep it private, like the password itself."
+      : "No app password is set, so anyone with this link can use your AI credits. Set APP_PASSWORD on Vercel to protect it.";
+  openSheet("#claudeSheet");
+});
+$("#mcpCopy").addEventListener("click", async () => {
+  toast((await copyConnector()) ? "Connector link copied" : "Select the link and copy it");
+});
+$("#mcpGo").addEventListener("click", async () => {
+  const win = window.open(CLAUDE_CONNECTORS, "_blank"); // open first: popup blockers want the click
+  if (win) win.opener = null;
+  const ok = await copyConnector();
+  toast(ok ? "Link copied — in Claude click “Add custom connector” and paste it" : "Copy the link above, then add it in Claude");
+  if (!win) location.href = CLAUDE_CONNECTORS;
+});
 $("#folderBtn").addEventListener("click", chooseFolder);
 $("#fmtList").addEventListener("click", (e) => { const b = e.target.closest("[data-fmt]"); if (b) openFormat(b.dataset.fmt); });
 $("#fmtAdd").addEventListener("click", () => openFormat(null));
