@@ -733,7 +733,9 @@ function cogsHtml(r, a) {
       <p class="cogs-how"><b>${esc(COGS_METHOD[b.method] || b.method || "")}</b>${b.rule && ["judged", "by_nature", "none"].includes(b.method) ? `, by ${esc(b.rule)}` : ""}. ${esc(b.explanation || "")}</p>
       ${lines.length ? `<table class="cogs-table"><thead><tr><th>${editable ? "Tick the lines that are cost of goods sold" : "Expense line"}</th>${
         shown.map((p) => `<th class="num">${esc(periodName(p))}</th>`).join("")}</tr></thead><tbody>${rows}</tbody>
-        <tfoot><tr><td>Cost of goods sold</td>${shown.map((_, i) => `<td class="num">${money((b.cogs || [])[i])}</td>`).join("")}</tr></tfoot></table>`
+        <tfoot><tr><td>Cost of goods sold</td>${shown.map((_, i) => `<td class="num">${money((b.cogs || [])[i])}</td>`).join("")}</tr>${
+          b.da_in_cogs ? `<tr class="sub"><td>of which depreciation &amp; amortisation</td>${shown.map((_, i) => `<td class="num">${money(b.da_in_cogs[i])}</td>`).join("")}</tr>
+          <tr class="sub"><td>excluding D&amp;A <small>(FactSet shows both)</small></td>${shown.map((_, i) => `<td class="num">${money((b.cogs_excl_da || [])[i])}</td>`).join("")}</tr>` : ""}</tfoot></table>`
         : `<p class="muted" style="margin:6px 0 0;font-size:13px">Cost of goods sold: ${esc(b.cogs_label || "blank")}</p>`}
       ${editable ? `<div class="notice-actions"><button type="button" class="btn btn-ink" data-cogs="recalc">${icon("refresh")}Recalculate</button>
         <button type="button" class="btn btn-outline" data-cogs="save" title="Its next filings are read with these lines as COGS">Save as my rule for ${esc(who)}</button></div>

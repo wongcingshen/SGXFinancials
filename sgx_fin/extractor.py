@@ -707,6 +707,9 @@ def _cogs_basis(data: dict, periods: list[dict], factor: float, rules: dict | No
 
 
 WORKED_OUT = ("judged", "computed", "your choice", "formula")
+# Depreciation, amortisation and depletion lines. FactSet's cost of revenue includes D&A and shows D&A on
+# its own too, so a COGS made of lines says how much of it is D&A and what it is without.
+DA_LINE = re.compile(r"depreciat|amorti[sz]|depletion", re.I)
 
 
 def _apply_cogs(values: dict, labels: dict, n: int, basis: dict, prefix: str = "judged") -> None:
@@ -735,6 +738,19 @@ def _settle_basis(basis: dict, values: dict, labels: dict) -> None:
     basis["cogs"] = list(cogs) if cogs else None
     basis["cogs_label"] = label
     basis["gross_profit_label"] = str(labels.get("gross_profit", ""))
+    n, da = len(cogs or []), None
+    if cogs and label.startswith(("judged", "your choice")):
+        inside = [ln for ln in basis["lines"] if ln["in_cogs"] and DA_LINE.search(ln["label"])]
+        if inside:
+            da = [None if all(ln["values"][i] is None for ln in inside)
+                  else round(sum(ln["values"][i] or 0 for ln in inside), 3) for i in range(n)]
+    elif cogs and label.startswith("computed (no cost of sales reported)"):  # the by-nature sum includes D&A
+        da = [None if d is None else -abs(d) for d in values.get("depreciation_amortisation") or [None] * n]
+    if da and any(v is not None for v in da):
+        basis["da_in_cogs"] = da
+        basis["cogs_excl_da"] = [None if c is None else round(c - (d or 0), 3) for c, d in zip(cogs, da)]
+    else:
+        basis["da_in_cogs"] = basis["cogs_excl_da"] = None
     if cogs and not label.startswith(WORKED_OUT):
         basis["method"] = "printed"
         basis["explanation"] = basis["explanation"] or f"Cost of sales as printed: {label}."

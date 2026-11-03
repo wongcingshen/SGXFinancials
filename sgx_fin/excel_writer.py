@@ -345,6 +345,14 @@ def _write_cogs(ws, entries):
             c.font = Font(bold=True)
             c.border = Border(top=THIN)
         ws.cell(row, len(periods) + 3, b.get("cogs_label", ""))
+        if b.get("da_in_cogs"):  # FactSet shows cost of revenue including D&A, and D&A on its own
+            for name, vals in (("of which depreciation & amortisation", b["da_in_cogs"]),
+                               ("Cost of goods sold excluding D&A", b.get("cogs_excl_da") or [])):
+                row += 1
+                ws.cell(row, 1, name).font = Font(italic=True)
+                for j, v in enumerate(vals, start=2):
+                    ws.cell(row, j, v).number_format = NUM_FMT
+            ws.cell(row, len(periods) + 3, "FactSet's cost of revenue including D&A is the total above; excluding D&A, this")
         for j in range(2, len(periods) + 2):
             ws.column_dimensions[get_column_letter(j)].width = max(ws.column_dimensions[get_column_letter(j)].width or 0, 15)
         ws.column_dimensions[get_column_letter(len(periods) + 3)].width = 60

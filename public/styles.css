@@ -296,6 +296,7 @@ details.others > summary:hover { color: var(--color-ink); }
 .cogs-table td { padding: 7px 8px; border-bottom: 1px solid var(--color-line); vertical-align: top; }
 .cogs-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .cogs-table tfoot td { font-weight: 700; border-bottom: 0; }
+.cogs-table tfoot tr.sub td { font-weight: 500; color: var(--color-muted); padding-top: 2px; }
 .cogs-pick { display: flex; gap: 10px; align-items: flex-start; }
 .cogs-pick input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--color-ember-deep); flex-shrink: 0; }
 .cogs-pick small { display: block; color: var(--color-muted); font-size: 12px; }

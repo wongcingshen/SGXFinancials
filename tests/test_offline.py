@@ -1164,6 +1164,11 @@ def test_industries_and_cogs_rules():
     assert "- aquaculture (Aquaculture; Fish farms). COGS (the user's own rule): Feed + fry + farm staff" in text
     assert "The user's own rule for this company (\"F13\")" in text and "Raw materials + changes in inventories only" in text
     assert "aquaculture" in extractor.build_schema(None, rules)["properties"]["industry"]["enum"]
+    # Industrial rules put D&A in, as FactSet's cost of revenue does; REITs, banks and insurers keep their own.
+    fs = "Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A."
+    built = {i["id"]: i["cogs"] for i in I.BUILTIN}
+    assert all(fs in built[i] for i in ("manufacturing", "trading", "transport", "technology", "services", "other"))
+    assert not any(fs in built[i] for i in ("reit", "bank", "finance", "insurance", "investment_holding"))
     assert "Raw materials + changes in inventories only" in extractor.build_system(None, rules)
 
 
@@ -1184,6 +1189,19 @@ def test_cogs_is_judged_line_by_line_and_explained():
         "manufacturing", "AI", "by_nature", "the built-in Manufacturing & industrials rule")
     assert b["evidence"] == "precision parts; raw materials consumed" and b["explanation"].startswith("Materials")
     assert [ln["in_cogs"] for ln in b["lines"]] == [True, True, True, False, False] and b["lines"][3]["values"] == [-20_000, -18_500]
+    assert b["da_in_cogs"] is None and b["cogs_excl_da"] is None  # no D&A among the lines marked in
+
+    # FactSet's convention: cost of revenue including D&A, with D&A also shown on its own. A COGS that
+    # takes in the depreciation line says how much of it is D&A, and what it is without.
+    with_da = by_nature()
+    with_da["cost_of_sales_basis"]["lines"][4]["in_cogs"] = True
+    b = extractor.normalise(with_da)["income_statement"]["cogs_basis"]
+    assert b["cogs"] == [-73_500, -68_450] and b["da_in_cogs"] == [-6_000, -5_650] and b["cogs_excl_da"] == [-67_500, -62_800]
+    data, _ = workbook_bytes(None, extractor.normalise(with_da), {"company_name": "FU YU", "filing": "1H2026"})
+    sheet = [[c for c in r if c is not None] for r in load_workbook(io.BytesIO(data))["COGS Basis"].iter_rows(values_only=True)]
+    assert ["of which depreciation & amortisation", -6_000, -5_650] in sheet
+    assert sheet[sheet.index(["of which depreciation & amortisation", -6_000, -5_650]) + 1][:3] == [
+        "Cost of goods sold excluding D&A", -67_500, -62_800]
 
     # The user's rule for the company decides the industry; with no answer, the filing's own words do.
     rules = I.for_filing({"companies": [{"match": "ACME", "industry": "trading", "cogs": "Purchases only"}]}, "", "ACME HOLDINGS")
@@ -1209,8 +1227,11 @@ def test_cogs_is_judged_line_by_line_and_explained():
     old = json.loads(json.dumps(FAKE))
     old["income_statement"]["rows"] = [r for r in old["income_statement"]["rows"] if r["key"] not in ("cost_of_sales", "gross_profit")] + [
         {"key": "raw_materials", "source_label": "Raw materials", "values": [-50_000, -45_000]}]
+    old["income_statement"]["rows"].append({"key": "depreciation_amortisation", "source_label": "D&A", "values": [-5_000, -4_000]})
     b = extractor.normalise(old)["income_statement"]["cogs_basis"]  # a reading from before bases: the by-nature sum
     assert b["method"] == "program" and b["explanation"].startswith("Worked out by the program: raw materials")
+    assert b["cogs"] == [-55_000, -49_000] and b["da_in_cogs"] == [-5_000, -4_000] and b["cogs_excl_da"] == [-50_000, -45_000]
+    assert extractor.normalise(FAKE)["income_statement"]["cogs_basis"]["da_in_cogs"] is None  # printed: the D&A inside isn't shown
 
     # GLM's free-form answer keeps the industry and the basis (numbers as printed text too).
     raw = by_nature()
