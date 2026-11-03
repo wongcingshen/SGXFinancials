@@ -1,1 +1,1 @@
-"""SGX financial results -> ShareInvestor-style Excel."""
+"""SGX financial results -> standard Excel."""

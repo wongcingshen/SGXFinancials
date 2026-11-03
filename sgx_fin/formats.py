@@ -1,10 +1,10 @@
-"""Read a statement layout ("format") from a ShareInvestor export or from pasted rows.
+"""Read a statement layout ("format") from a spreadsheet export or from pasted rows.
 
 Accepted input
   - Excel (.xlsx): one sheet per statement (named like "Income Statement", "Balance Sheet",
     "Cash Flow"), or one sheet with those words as section headings. A workbook made by this
     app also works, so its column-A labels can be edited in Excel and imported back.
-  - CSV / pasted text (e.g. copied from ShareInvestor's Financials page): the label is the first
+  - CSV / pasted text (e.g. copied from a financial data site): the label is the first
     cell or text of each line; "Income Statement" / "Balance Sheet" / "Cash Flow" lines start a
     section, numbers and dates are ignored.
 Row kinds are guessed: a line with no figures that is followed by lines is a header, a bold line

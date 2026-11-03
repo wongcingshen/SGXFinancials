@@ -140,7 +140,7 @@ def list_formats():
 
 @api("parse_format", "POST")
 def parse_format():
-    """A format from a ShareInvestor export (.xlsx/.csv), pasted rows, or the editable text."""
+    """A format from a spreadsheet export (.xlsx/.csv), pasted rows, or the editable text."""
     from sgx_fin import formats as F, template as T
     f = request.form
     up = request.files.get("file")
