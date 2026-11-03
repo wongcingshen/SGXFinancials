@@ -2,7 +2,8 @@
 
 Sheets: Income Statement, Balance Sheet, Cash Flow (row labels down column A,
 one column per period), Checks (each filing's verdict, then the arithmetic
-tie-outs), Source Map (which company line each figure came from), and for filings whose statements are
+tie-outs), Source Map (which company line each figure came from), COGS Basis (each filing's
+industry and how its cost of goods sold was made up, line by line), and for filings whose statements are
 pictures, Transcription (the tables as read from the pictures, re-read figures
 and rows that still don't add up marked). Every run merges into the existing
 workbook, so quarterly / half-year / full-year filings accumulate as columns.
@@ -54,7 +55,7 @@ def _load_store(src: Path | bytes | None) -> list[dict]:
     return [json.loads(r[0]) for r in wb["_store"].iter_rows(values_only=True) if r and r[0]]
 
 
-BULKY = ("transcription", "located", "pictures", "rechecked")  # kept once per filing, not per figure
+BULKY = ("transcription", "located", "pictures", "rechecked", "cogs_basis")  # kept once per filing, not per figure
 
 
 def _load_tables(src: bytes | None) -> list[dict]:
@@ -75,6 +76,26 @@ def merge_tables(existing: list[dict], meta: dict) -> list[dict]:
     entry = {"key": key, "filing": meta.get("filing", ""), "source_pdf": meta.get("source_pdf", ""),
              "model": pics.get("model", ""), "tables": meta["transcription"], "corrections": pics.get("corrections", []),
              "doubtful": pics.get("doubtful", []), "doubtful_rows": pics.get("doubtful_rows", []), "turned": pics.get("turned", {})}
+    return [entry] + [e for e in existing if e.get("key") != key]
+
+
+def _load_cogs(src: bytes | None) -> list[dict]:
+    if not src:
+        return []
+    wb = load_workbook(io.BytesIO(src))
+    if "_cogs" not in wb.sheetnames:
+        return []
+    return [json.loads(r[0]) for r in wb["_cogs"].iter_rows(values_only=True) if r and r[0]]
+
+
+def merge_cogs(existing: list[dict], normalised: dict, meta: dict) -> list[dict]:
+    """How each filing's cost of goods sold was made up, one entry per filing (a re-run or a correction
+    replaces it), newest first."""
+    basis = (normalised.get("income_statement") or {}).get("cogs_basis") or meta.get("cogs_basis")
+    if not basis:
+        return existing
+    key = meta.get("filing") or meta.get("source_pdf") or ""
+    entry = {"key": key, "filing": meta.get("filing") or meta.get("source_pdf") or "This filing", "basis": basis}
     return [entry] + [e for e in existing if e.get("key") != key]
 
 
@@ -117,10 +138,13 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
     """Merge into an existing workbook (or start fresh) and return the new .xlsx bytes."""
     records = merge_records(_load_store(existing), normalised, meta)
     tables = merge_tables(_load_tables(existing), meta)
+    cogs = merge_cogs(_load_cogs(existing), normalised, meta)
     wb = Workbook()
     wb.remove(wb.active)
     company = meta.get("company_name", "")
     currency = meta.get("currency", "")
+    industry = next((r.get("industry") for r in sorted(records, key=lambda r: r["period_end"], reverse=True)
+                     if r.get("industry")), meta.get("industry", ""))
 
     # A bank gets the bank layout; the newest filing decides if a workbook somehow has both.
     fmt = next((r.get("format") for r in sorted(records, key=lambda r: r["period_end"], reverse=True)
@@ -136,11 +160,17 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
         # Group columns by length (full year, 9M, half year, quarter), latest first within each,
         # so quarters and years aren't interleaved; balance sheet dates simply by date.
         recs.sort(key=lambda r: (r["months"], r["period_end"]), reverse=T.LATEST_FIRST)
-        _write_statement(ws, title, rows, recs, company, meta.get("stock_code", ""), currency, warning)
+        _write_statement(ws, title, rows, recs, company, meta.get("stock_code", ""), currency, warning, industry)
 
     checks = run_checks(records)
     _write_checks(wb.create_sheet("Checks"), checks, verdicts)
     _write_sources(wb.create_sheet("Source Map"), records, formats)
+    if cogs:
+        _write_cogs(wb.create_sheet("COGS Basis"), cogs)
+        hidden = wb.create_sheet("_cogs")
+        for e in cogs:
+            hidden.append([json.dumps(e)])
+        hidden.sheet_state = "hidden"
 
     if tables:
         _write_transcription(wb.create_sheet("Transcription"), tables)
@@ -159,10 +189,10 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
     return buf.getvalue(), checks
 
 
-def _write_statement(ws, title, rows, recs, company, code, currency, warning=""):
+def _write_statement(ws, title, rows, recs, company, code, currency, warning="", industry=""):
     ws["A1"] = f"{company} ({code})" if code else company
     ws["A1"].font = Font(bold=True, size=13)
-    ws["A2"] = f"{title} — {currency} {T.OUTPUT_UNIT_LABEL} (EPS in cents)"
+    ws["A2"] = f"{title} — {currency} {T.OUTPUT_UNIT_LABEL} (EPS in cents)" + (f" · Industry: {industry}" if industry else "")
     ws["A2"].font = Font(italic=True, color="595959")
     if warning:  # a filing whose figures nothing confirms: said where the figures are, not only on Checks
         ws["A3"] = warning
@@ -262,6 +292,63 @@ def _write_checks(ws, checks, verdicts=()):
         ws.cell(ws.max_row, 4).fill = PatternFill("solid", fgColor=colours[ch["status"]])
     for col, w in zip("ABCDEF", (18, 16, 50, 10, 18, 22)):
         ws.column_dimensions[col].width = w
+
+
+METHODS = {"printed": "printed in the filing", "by_nature": "judged from expenses by nature",
+           "judged": "judged from the expense lines", "none": "nothing on the statement is a cost of earning the revenue",
+           "program": "worked out by the program", "chosen": "your choice of lines", "missing": "not found"}
+
+
+def _write_cogs(ws, entries):
+    """Each filing's industry and how its cost of goods sold was made up: every expense line on the
+    face of the income statement with its figures, whether it is in COGS and why, and the total."""
+    ws.column_dimensions["A"].width = 46
+    ws.cell(1, 1, "How the cost of goods sold was worked out when a filing doesn't print a cost of sales: the lines "
+                  "marked Yes are added up, and gross profit = revenue + cost of goods sold. Change the rules in the "
+                  "web app (Settings > Cost of goods sold) or tick other lines in the filing's details.").font = Font(italic=True, color="595959")
+    row = 2
+    for e in entries:
+        b = e.get("basis") or {}
+        periods = b.get("periods") or []
+        row += 1  # a blank row between filings
+        ws.cell(row, 1, f"{e.get('filing')} — industry: {b.get('industry_name', '')}"
+                        + (f" ({b['evidence']})" if b.get("evidence") else "")).font = Font(bold=True, size=12)
+        by = f", by {b['rule']}" if b.get("rule") and b.get("method") in ("judged", "by_nature", "none") else ""
+        row += 1
+        ws.cell(row, 1, f"Cost of goods sold: {METHODS.get(b.get('method'), b.get('method') or '')}{by}")
+        if b.get("explanation"):
+            row += 1
+            ws.cell(row, 1, f"How: {b['explanation']}")
+        if b.get("also_suggests"):
+            row += 1
+            ws.cell(row, 1, f"The filing's lines also suggest: {b['also_suggests']}").font = Font(color="9C5700")
+        row += 1
+        for j, h in enumerate(["Line (as printed)", *[period_label(p["period_end"], p["months"]) for p in periods],
+                               "In COGS", "Why"], start=1):
+            c = ws.cell(row, j, h)
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = HEAD_FILL
+        for ln in b.get("lines") or []:
+            row += 1
+            ws.cell(row, 1, ln.get("label"))
+            for j, v in enumerate(ln.get("values") or [], start=2):
+                ws.cell(row, j, v).number_format = NUM_FMT
+            yes = ws.cell(row, len(periods) + 2, "Yes" if ln.get("in_cogs") else "No")
+            if ln.get("in_cogs"):
+                yes.fill = FIXED_FILL
+            ws.cell(row, len(periods) + 3, ln.get("why", ""))
+        row += 1
+        ws.cell(row, 1, "Cost of goods sold").font = Font(bold=True)
+        for j, v in enumerate(b.get("cogs") or [], start=2):
+            c = ws.cell(row, j, v)
+            c.number_format = NUM_FMT
+            c.font = Font(bold=True)
+            c.border = Border(top=THIN)
+        ws.cell(row, len(periods) + 3, b.get("cogs_label", ""))
+        for j in range(2, len(periods) + 2):
+            ws.column_dimensions[get_column_letter(j)].width = max(ws.column_dimensions[get_column_letter(j)].width or 0, 15)
+        ws.column_dimensions[get_column_letter(len(periods) + 3)].width = 60
+        row += 1
 
 
 FIXED_FILL = PatternFill("solid", fgColor="C6EFCE")

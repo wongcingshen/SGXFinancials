@@ -500,6 +500,8 @@ function formData(a, dryRun, pages, workbook, files) {
   for (const f of files || a.attachments || []) { fd.append("pdf_url", f.url); fd.append("pdf_name", f.name || ""); }
   const formats = customFormats();
   if (formats.length) fd.append("formats", JSON.stringify(formats.map(({ marked, ...f }) => f)));
+  const cogs = cogsPrefs();
+  if (cogs.industries.length || cogs.companies.length) fd.append("cogs_rules", JSON.stringify(cogs));
   if (a.file) fd.append("pdf", a.file);
   fd.append("dry_run", dryRun ? "true" : "false");
   fd.append("effort", state.effort);
@@ -701,7 +703,45 @@ function verdictHtml(r, canClaude) {
       : "Check the figures against the PDF, or choose the statement pages below and extract again."}</div></div>`;
 }
 
-function resultHtml(r, canClaude) {
+// How cost of goods sold was made up: the industry, the rule, every expense line in or out. Lines can be
+// ticked differently and recalculated (no AI), or saved as the company's rule for its next filings.
+const COGS_METHOD = { printed: "Printed in the filing", by_nature: "Judged from expenses by nature", judged: "Judged from the expense lines",
+  none: "Nothing on the statement is a cost of earning the revenue", program: "Worked out by the program", chosen: "Your choice of lines",
+  missing: "Not found" };
+const money = (v) => (v == null ? "–" : v < 0 ? `(${Math.abs(v).toLocaleString()})` : Number(v).toLocaleString());
+const periodName = (p) => {
+  const d = new Date(`${p.period_end}T00:00:00`);
+  const my = Number.isNaN(d.getTime()) ? p.period_end : d.toLocaleDateString("en-SG", { month: "short", year: "numeric" });
+  return p.months ? `${p.months === 12 ? "FY" : `${p.months}M`} ${my}` : my;
+};
+function cogsHtml(r, a) {
+  const b = r.meta?.cogs_basis;
+  if (!b) return "";
+  const shown = (b.periods || []).slice(0, 2);
+  const lines = b.lines || [];
+  const editable = b.method !== "printed" && lines.length && r.normalised;
+  const rows = lines.map((ln, k) => `<tr><td><label class="cogs-pick">${editable
+    ? `<input type="checkbox" data-line="${k}" ${ln.in_cogs ? "checked" : ""} aria-label="${esc(ln.label)} is cost of goods sold">`
+    : `<span class="yn ${ln.in_cogs ? "in" : ""}">${ln.in_cogs ? "in" : "out"}</span>`}<span>${esc(ln.label)}${ln.why ? `<small>${esc(ln.why)}</small>` : ""}</span></label></td>${
+    shown.map((_, i) => `<td class="num">${money((ln.values || [])[i])}</td>`).join("")}</tr>`).join("");
+  const who = a.stock_code || nameCase(a.issuer) || "this company";
+  return `<div>
+      <p class="block-title">Industry and cost of goods sold</p>
+      <div class="kv"><span>Industry: <b>${esc(b.industry_name)}</b>${b.evidence ? ` · ${esc(b.evidence)}` : ""}</span>
+        <span>decided by ${esc(b.decided_by === "AI" ? state.ai : b.decided_by || "")}</span></div>
+      ${b.also_suggests ? `<div class="notice" style="margin-top:8px">${icon("alert")}<div>The filing’s own lines suggest <b>${esc(b.also_suggests)}</b>. If that’s right, give ${esc(who)} a company rule in Settings.</div></div>` : ""}
+      <p class="cogs-how"><b>${esc(COGS_METHOD[b.method] || b.method || "")}</b>${b.rule && ["judged", "by_nature", "none"].includes(b.method) ? `, by ${esc(b.rule)}` : ""}. ${esc(b.explanation || "")}</p>
+      ${lines.length ? `<table class="cogs-table"><thead><tr><th>${editable ? "Tick the lines that are cost of goods sold" : "Expense line"}</th>${
+        shown.map((p) => `<th class="num">${esc(periodName(p))}</th>`).join("")}</tr></thead><tbody>${rows}</tbody>
+        <tfoot><tr><td>Cost of goods sold</td>${shown.map((_, i) => `<td class="num">${money((b.cogs || [])[i])}</td>`).join("")}</tr></tfoot></table>`
+        : `<p class="muted" style="margin:6px 0 0;font-size:13px">Cost of goods sold: ${esc(b.cogs_label || "blank")}</p>`}
+      ${editable ? `<div class="notice-actions"><button type="button" class="btn btn-ink" data-cogs="recalc">${icon("refresh")}Recalculate</button>
+        <button type="button" class="btn btn-outline" data-cogs="save" title="Its next filings are read with these lines as COGS">Save as my rule for ${esc(who)}</button></div>
+        <p class="muted" style="margin:6px 0 0;font-size:12.5px">Recalculate adds up the ticked lines again without AI and updates the workbook; every period is in its COGS Basis sheet.</p>` : ""}
+    </div>`;
+}
+
+function resultHtml(r, canClaude, a = {}) {
   const pass = r.checks.filter((c) => c.status === "PASS").length;
   const fail = r.checks.filter((c) => c.status === "FAIL");
   const na = r.checks.length - pass - fail.length;
@@ -722,6 +762,7 @@ function resultHtml(r, canClaude) {
           <span class="tag ${c.status === "PASS" ? "pass" : c.status === "FAIL" ? "fail" : "na"}">${c.status === "n/a" ? "n/a" : c.status.toLowerCase()}</span></div>`).join("")}</div>
       </details>
     </div>
+    ${cogsHtml(r, a)}
     ${r.meta.pictures ? picturesHtml(r.meta.pictures) : ""}
     ${(r.meta.vision || r.meta.located_by_ai) && r.meta.found_pages ? `<div class="kv">${STATEMENTS.map((s) => `<span>${s.name}: <b>${
       (r.meta.found_pages[s.key] || []).map((p) => `p${p}`).join(", ") || "not found"}</b></span>`).join("")}</div>` : ""}
@@ -754,7 +795,7 @@ function showDetails(a) {
   $("#runBody").innerHTML = `${stepsHtml(j)}<div class="stage">
     ${filesLine(a) ? `<div>${filesLine(a)}</div>` : ""}
     ${scan ? scanHtml(scan.scan, scan.pages, j.status === "skipped") : ""}
-    ${j.result ? resultHtml(j.result, Boolean(a.url)) : ""}
+    ${j.result ? resultHtml(j.result, Boolean(a.url), a) : ""}
     ${j.status === "failed" ? `<div class="notice error">${icon("alert")}<div>${esc(j.error)}${a.url ? `
       <div class="notice-actions"><button type="button" class="btn btn-outline" data-why="failed">${icon("sparkles")}Read it with Claude</button></div>` : ""}</div></div>` : ""}
     ${j.status === "skipped" ? `<div class="notice info">${icon("info")}<div>${esc(j.error)} No AI was used. If this is wrong, enter the statement pages below to extract anyway${
@@ -943,6 +984,181 @@ async function guarded(fn) {
   try { await fn(); } catch (e) { showProblems([e.message]); }
 }
 
+// ------------------------------------------------------------------ cost of goods sold rules
+// Built-in industries and their COGS rules come from the server (industries/cogs.json). A user's changes
+// (an industry's rule, new industries, company rules) are kept in this browser and sent with every
+// extraction; a company rule (by stock code or part of the name) comes before its industry's rule.
+state.industries = [];
+let editingCogs = null; // { kind: "industry" | "company", key }
+function cogsPrefs() {
+  try {
+    const p = JSON.parse(store.get("sgxf-cogs", "{}")) || {};
+    return { industries: Array.isArray(p.industries) ? p.industries : [], companies: Array.isArray(p.companies) ? p.companies : [] };
+  } catch { return { industries: [], companies: [] }; }
+}
+function saveCogsPrefs(p) {
+  store.set("sgxf-cogs", JSON.stringify(p));
+  renderCogs();
+}
+function allIndustries() {
+  const mine = cogsPrefs().industries;
+  const builtin = new Set(state.industries.map((i) => i.id));
+  return [...state.industries.map((b) => {
+    const m = mine.find((x) => x.id === b.id);
+    return m ? { ...b, ...m, tag: "your version" } : { ...b, tag: "built-in" };
+  }), ...mine.filter((m) => !builtin.has(m.id)).map((m) => ({ ...m, tag: "yours" }))];
+}
+const industryName = (id) => allIndustries().find((i) => i.id === id)?.name || id;
+async function loadIndustries() {
+  try { state.industries = (await (await fetch("/api/industries?op=industries")).json()).industries || []; } catch { /* offline */ }
+  renderCogs();
+}
+function renderCogs() {
+  $("#indList").innerHTML = allIndustries().map((i) => `<div class="fmt-item"><span class="t"><b>${esc(i.name)}</b>
+      <span class="tag ${i.tag === "built-in" ? "na" : "pass"}">${i.tag}</span><small title="${esc(i.cogs)}">${esc(i.cogs)}</small></span>
+      <button type="button" class="btn btn-outline" data-ind="${esc(i.id)}" style="min-height:36px;padding:0 12px">Edit</button></div>`).join("")
+    || `<p class="muted" style="margin:0;font-size:13px">Industries load when the server is reachable.</p>`;
+  const cos = cogsPrefs().companies;
+  $("#coList").innerHTML = cos.map((c, k) => `<div class="fmt-item"><span class="t"><b>${esc(c.match)}</b>
+      ${c.industry ? `<span class="tag na">${esc(industryName(c.industry))}</span>` : ""}<small title="${esc(c.cogs)}">${esc(c.cogs || "its industry’s rule")}</small></span>
+      <button type="button" class="btn btn-outline" data-co="${k}" style="min-height:36px;padding:0 12px">Edit</button></div>`).join("")
+    || `<p class="muted" style="margin:0;font-size:13px">None yet. Add one here, or tick a filing’s cost of goods sold lines in its details and save them as its rule.</p>`;
+}
+const industryId = (name) => {
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+  return /^[a-z]/.test(id) ? id : `i_${id || "industry"}`;
+};
+function openCogs(kind, key = null) {
+  editingCogs = { kind, key };
+  const isInd = kind === "industry";
+  $("#indFields").hidden = !isInd;
+  $("#coFields").hidden = isInd;
+  if (isInd) {
+    const i = key ? allIndustries().find((x) => x.id === key) : null;
+    $("#cogsTitle").textContent = i ? i.name : "New industry";
+    $("#cogsSub").textContent = i?.tag === "built-in" ? "A built-in rule: your version replaces it in this browser." : "How cost of goods sold is made up when a filing prints none.";
+    $("#indName").value = i?.name || "";
+    $("#indApplies").value = i?.applies_to || "";
+    $("#indKeywords").value = (i?.keywords || []).join(", ");
+    $("#cogsText").value = i?.cogs || "";
+    $("#cogsDelete").hidden = !i || i.tag === "built-in";
+    $("#cogsDelete").textContent = i?.tag === "your version" ? "Back to the built-in rule" : "Remove this industry";
+  } else {
+    const c = key != null ? cogsPrefs().companies[key] : null;
+    $("#cogsTitle").textContent = c ? `Rule for ${c.match}` : "Company rule";
+    $("#cogsSub").textContent = "Comes before its industry’s rule, for every filing of this company.";
+    $("#coMatch").value = c?.match || "";
+    $("#coIndustry").innerHTML = `<option value="">Let ${esc(state.ai)} decide</option>`
+      + allIndustries().map((i) => `<option value="${esc(i.id)}">${esc(i.name)}</option>`).join("");
+    $("#coIndustry").value = c?.industry || "";
+    $("#cogsText").value = c?.cogs || "";
+    $("#cogsDelete").hidden = c == null;
+    $("#cogsDelete").textContent = "Remove this company rule";
+  }
+  openSheet("#cogsSheet");
+}
+$("#cogsSave").addEventListener("click", () => {
+  const p = cogsPrefs();
+  const text = $("#cogsText").value.trim();
+  if (editingCogs.kind === "industry") {
+    const name = $("#indName").value.trim();
+    if (!name) return toast("Give the industry a name");
+    if (!text) return toast("Say what its cost of goods sold is made of");
+    const id = editingCogs.key || industryId(name);
+    const entry = { id, name, applies_to: $("#indApplies").value.trim(), cogs: text,
+      keywords: $("#indKeywords").value.split(",").map((w) => w.trim()).filter(Boolean) };
+    p.industries = [...p.industries.filter((i) => i.id !== id), entry];
+  } else {
+    const match = $("#coMatch").value.trim();
+    if (!match) return toast("Enter the stock code or part of the company name");
+    if (!text && !$("#coIndustry").value) return toast("Choose its industry or say what its cost of goods sold is made of");
+    const entry = { match, industry: $("#coIndustry").value, cogs: text };
+    p.companies = [...p.companies];
+    if (editingCogs.key != null) p.companies[editingCogs.key] = entry;
+    else p.companies = [...p.companies.filter((c) => c.match.toUpperCase() !== match.toUpperCase()), entry];
+  }
+  saveCogsPrefs(p);
+  $("#cogsSheet").close();
+  toast("Saved. The next extractions follow it.");
+});
+$("#cogsDelete").addEventListener("click", () => {
+  const p = cogsPrefs();
+  if (editingCogs.kind === "industry") p.industries = p.industries.filter((i) => i.id !== editingCogs.key);
+  else p.companies = p.companies.filter((_, k) => k !== editingCogs.key);
+  saveCogsPrefs(p);
+  $("#cogsSheet").close();
+  toast("Removed");
+});
+$("#indList").addEventListener("click", (e) => { const b = e.target.closest("[data-ind]"); if (b) openCogs("industry", b.dataset.ind); });
+$("#coList").addEventListener("click", (e) => { const b = e.target.closest("[data-co]"); if (b) openCogs("company", +b.dataset.co); });
+$("#indAdd").addEventListener("click", () => openCogs("industry"));
+$("#coAdd").addEventListener("click", () => openCogs("company"));
+$("#cogsExport").addEventListener("click", () => {
+  const p = cogsPrefs();
+  const out = { industries: allIndustries().map(({ tag, ...i }) => i), companies: p.companies };
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 1)], { type: "application/json" }));
+  link.download = "cogs.json";
+  link.click();
+});
+
+// The user's rule for a filing, as the Claude connector takes it (cogs_rule): the company's own, else
+// their version of its industry's rule.
+function cogsRuleFor(a) {
+  const p = cogsPrefs();
+  const code = (a.stock_code || "").toUpperCase(), name = (a.issuer || "").toUpperCase();
+  const c = p.companies.find((x) => (code && x.match.toUpperCase() === code)
+    || (name && x.match.length >= 3 && name.includes(x.match.toUpperCase())));
+  if (c) return { match: c.match, industry: c.industry, cogs: c.cogs };
+  const iid = a.job?.result?.meta?.cogs_basis?.industry;
+  const mine = iid && p.industries.find((i) => i.id === iid);
+  return mine ? { match: a.stock_code || a.issuer || "this company", industry: iid, cogs: mine.cogs } : null;
+}
+
+const pickedLines = () => [...document.querySelectorAll("#runBody [data-line]")]
+  .sort((x, y) => x.dataset.line - y.dataset.line).map((x) => x.checked);
+
+// The ticked lines added up again on the server (no AI): new COGS, gross profit, verdict and workbook.
+async function recalcCogs(a) {
+  const j = a.job, r = j.result;
+  const fd = new FormData();
+  fd.append("normalised", JSON.stringify(r.normalised));
+  fd.append("meta", JSON.stringify(r.meta));
+  fd.append("in_cogs", JSON.stringify(pickedLines()));
+  const formats = customFormats();
+  if (formats.length) fd.append("formats", JSON.stringify(formats.map(({ marked, ...f }) => f)));
+  const existing = state.folderOk && j.saved ? await readFromFolder(j.filename) : j.blob;
+  if (existing) fd.append("workbook", existing, j.filename);
+  try {
+    const res = await api("/api/recompute?op=recompute", { method: "POST", body: fd, timeoutMs: 60_000 });
+    Object.assign(r, { normalised: res.normalised, meta: res.meta, verdict: res.verdict, checks: res.checks });
+    const blob = new Blob([Uint8Array.from(atob(res.workbook_b64), (c) => c.charCodeAt(0))],
+      { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    if (j.blobUrl) URL.revokeObjectURL(j.blobUrl);
+    Object.assign(j, { blob, blobUrl: URL.createObjectURL(blob) });
+    if (state.folderOk) {
+      try { await saveToFolder(j.filename, blob); j.saved = true; } catch (e) { j.saveError = e.message || String(e); }
+    }
+    renderCard(a);
+    toast(`Cost of goods sold recalculated${res.chosen.length ? ` from ${res.chosen.length} line${res.chosen.length === 1 ? "" : "s"}` : ": none, so gross profit equals revenue"}. The workbook is updated.`);
+  } catch (e) {
+    toast(e.message || String(e));
+  }
+}
+function saveCogsRule(a) {
+  const b = a.job.result.meta.cogs_basis;
+  const picks = pickedLines();
+  const lines = (b.lines || []).map((ln, k) => ({ label: ln.label, in: picks[k] ?? ln.in_cogs }));
+  const inn = lines.filter((x) => x.in).map((x) => x.label), out = lines.filter((x) => !x.in).map((x) => x.label);
+  const rule = inn.length ? `Cost of goods sold = ${inn.join(" + ")}.${out.length ? ` Leave out ${out.join(", ")}.` : ""}`
+    : "Nothing on the statement is a cost of earning the revenue: gross profit equals revenue.";
+  const match = a.stock_code || nameCase(a.issuer);
+  const p = cogsPrefs();
+  p.companies = [...p.companies.filter((c) => c.match.toUpperCase() !== match.toUpperCase()), { match, industry: b.industry, cogs: rule }];
+  saveCogsPrefs(p);
+  toast(`Saved as the rule for ${match}: its next filings follow it (Settings › Cost of goods sold).`);
+}
+
 // ------------------------------------------------------------------ wiring
 [$("#from").value, $("#to").value] = defaultRange();
 $("#screenForm").addEventListener("submit", screen);
@@ -984,8 +1200,10 @@ function claudePrompt(a, why = "photos") {
     failed: `Use the SGX Financials connector to read this SGX results filing; the app couldn't (${j.error || "it failed"}). `
       + "Open it with open_filing (as_images=true to read the pages yourself), then submit_statements, and give me the Excel download link.",
   }[why] || "";
+  const rule = cogsRuleFor(a);
   return [
     ask,
+    rule ? `My cost of goods sold rule for this company (pass it to open_filing and submit_statements as cogs_rule): ${JSON.stringify(rule)}` : "",
     `Company: ${nameCase(a.issuer) || "?"}${a.stock_code ? ` (${a.stock_code})` : ""}`,
     a.title ? `Filing: ${shortTitle(a.title)}` : "",
     `Announcement: ${a.url}`,
@@ -1148,9 +1366,12 @@ function askClaude(a, why) {
   }
 }
 $("#runSheet").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-why]");
+  const b = e.target.closest("[data-why], [data-cogs]");
   const a = b && state.items.find((x) => x.key === $("#runSheet").dataset.key);
-  if (a) askClaude(a, b.dataset.why);
+  if (!a) return;
+  if (b.dataset.cogs === "recalc") return recalcCogs(a);
+  if (b.dataset.cogs === "save") return saveCogsRule(a);
+  askClaude(a, b.dataset.why);
 });
 
 // Deep link: /?url=<SGX page URL> (or ?from=YYYYMMDD&to=YYYYMMDD) pre-fills the dates and screens.
@@ -1165,6 +1386,7 @@ syncEffort();
 renderIntro();
 loadHealth();
 loadFormats();
+loadIndustries();
 if (canPickFolder) idb("readonly", (st) => st.get("dir")).then((d) => { state.dir = d || null; renderFolder(); });
 renderFolder();
 if (iso(deep.get("from"))) screen();

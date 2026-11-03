@@ -290,6 +290,17 @@ details.others > summary:hover { color: var(--color-ink); }
 .notice ul.reasons { margin: 6px 0 8px; padding-left: 18px; }
 .notice-actions { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px; }
 .notice-actions .btn { min-height: 40px; padding: 0 14px; }
+.cogs-how { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; }
+.cogs-table { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 13px; }
+.cogs-table th { text-align: left; font-size: 12px; font-weight: 600; color: var(--color-muted); padding: 6px 8px; border-bottom: 1px solid var(--color-line); }
+.cogs-table td { padding: 7px 8px; border-bottom: 1px solid var(--color-line); vertical-align: top; }
+.cogs-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cogs-table tfoot td { font-weight: 700; border-bottom: 0; }
+.cogs-pick { display: flex; gap: 10px; align-items: flex-start; }
+.cogs-pick input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--color-ember-deep); flex-shrink: 0; }
+.cogs-pick small { display: block; color: var(--color-muted); font-size: 12px; }
+.cogs-pick .yn { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--color-muted); min-width: 26px; }
+.cogs-pick .yn.in { color: var(--trip-olive); }
 
 .footer-note { margin: 40px 0 56px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; font-size: 13px; color: var(--color-muted); }
 .footer-note span { display: inline-flex; align-items: center; gap: 8px; }
@@ -338,6 +349,7 @@ dialog.sheet[open] { display: flex; flex-direction: column; animation: sheet-in 
 .fmt-item .t small { display: block; color: var(--color-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fmt-item .tag { font-size: 11.5px; padding: 3px 8px; }
 textarea.input { min-height: 0; padding: 10px 12px; line-height: 1.5; resize: vertical; }
+textarea.input:not(.mono) { font-family: inherit; }
 select.input { appearance: auto; }
 .two { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
 .divider { display: flex; align-items: center; gap: 12px; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--color-muted); }

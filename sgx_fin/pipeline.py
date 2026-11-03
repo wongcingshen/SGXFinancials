@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from . import checks, extractor, pictures
+from . import checks, extractor, industries, pictures
 from .checks import STATEMENT_NAMES, join_or
 from .page_scanner import ScanResult, page_texts, scan_pdf
 from .sgx_client import Announcement, SGXClient
@@ -123,7 +123,7 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
                 model: str | None = None, effort: str = "high",
                 dry_run: bool = False, meta: dict | None = None,
                 cache_dir: Path | None = None, deadline: float | None = None,
-                formats: dict | None = None) -> Result:
+                formats: dict | None = None, cogs: dict | None = None) -> Result:
     """Read the statements: the pages given, else the ones the keyword scan picked.
 
     Pages that are pictures (scans, photos, scans with a hidden OCR layer) go through
@@ -131,7 +131,10 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
     tell, straightened and cleaned up, copied as printed, checked, and doubtful rows re-read; the
     checked tables then fill the template like a text filing. When parts don't add up to a printed
     total after that, the template step looks once more with the failing checks pointed out.
+    `cogs`: the industries and COGS rules for this filing, the user's preferences included
+    (industries.for_filing); the built-in ones when not given.
     """
+    cogs = cogs or industries.for_filing(None, (meta or {}).get("stock_code", ""), (meta or {}).get("company_name", ""))
     scan = scan or cached_scan(pdf) or scan_pdf(pdf)
     manual = bool(pages)
     pages = pages or default_pages(scan)
@@ -165,13 +168,14 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
     def run(recheck: str = "", gaps: str = ""):
         if reading:
             return extractor.extract_text(pdf, reading.pages, pictures.as_text(reading.tables), model=model, effort=effort,
-                                          cache_dir=cache_dir, deadline=deadline, formats=formats, recheck=recheck, gaps=gaps)
+                                          cache_dir=cache_dir, deadline=deadline, formats=formats, recheck=recheck, gaps=gaps,
+                                          cogs=cogs)
         return extractor.extract(pdf, pages, model=model, effort=effort, cache_dir=cache_dir, vision=vision,
                                  locate=locate, deadline=deadline, formats=formats, context=context, recheck=recheck,
-                                 gaps=gaps)
+                                 gaps=gaps, cogs=cogs)
 
     ex = run()
-    normalised = extractor.normalise(ex.data, formats)
+    normalised = extractor.normalise(ex.data, formats, cogs)
     usage = dict(ex.usage)
     if reading:
         pictures._add_usage(usage, reading.usage)
@@ -185,7 +189,7 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
         factor = extractor.UNIT_FACTORS.get(ex.data.get("unit") or extractor.DEFAULT_UNIT, 1000) / extractor.T.OUTPUT_UNIT
         try:
             ex2 = run(checks.describe(fails, normalised, factor), checks.describe_gaps(gaps, normalised) if gaps else "")
-            second = extractor.normalise(ex2.data, formats)
+            second = extractor.normalise(ex2.data, formats, cogs)
             fixed = checks.reconcile(normalised, second)
             filled = extractor.fill_gross_profit(normalised, second) if gaps else []
             pictures._add_usage(usage, ex2.usage)
@@ -215,6 +219,9 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
         "model": ex.model if not reading or reading.model == ex.model else f"{reading.model} (copied) + {ex.model}",
         "vision": vision,
         "presentation": scan.presentation,
+        # The company's industry and how its cost of goods sold was made up (shown in the app and workbook).
+        "industry": (normalised["income_statement"].get("cogs_basis") or {}).get("industry_name", ""),
+        "cogs_basis": normalised["income_statement"].get("cogs_basis"),
         "located_by_ai": locate or bool(located),
         # Where the AI says each statement was, as page numbers of the original PDF.
         "found_pages": {st: found(st) for st in ("income_statement", "balance_sheet", "cash_flow")},

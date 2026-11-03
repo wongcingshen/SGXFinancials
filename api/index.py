@@ -6,6 +6,8 @@ Routes (the operation is also accepted as ?op=health|screen|process on any path)
   POST /api/process                   scan (+ extract) one filing, return workbook
   POST /api/mcp?op=mcp&key=...        MCP connector for Claude (sgx_fin/mcp_server.py)
   GET  /api/download?op=download&d=&s= a workbook from a connector result's signed link
+  GET  /api/industries                the built-in industries and their cost of goods sold rules
+  POST /api/recompute                 a filing's COGS from the lines the user ticked (no AI), new workbook
 On Vercel, /api/browse (api/browse.mjs) runs the headless browser for screening and attachments.
 
 Environment variables (Vercel > Project > Settings > Environment Variables)
@@ -218,11 +220,15 @@ def process():
             "filing": f.get("title", "")}
     WORK.mkdir(parents=True, exist_ok=True)
     client = SGXClient()
-    from sgx_fin import template as T
+    from sgx_fin import industries, template as T
     try:  # formats imported / edited in the web app replace or add to the built-in ones
         formats = T.resolve(json.loads(f.get("formats") or "[]"))
     except (ValueError, TypeError) as e:
         return jsonify(error=f"A saved statement format is invalid: {e}"), 400
+    try:  # the user's cost of goods sold preferences: industry rules and company rules
+        cogs = industries.for_filing(json.loads(f.get("cogs_rules") or "{}"), meta["stock_code"], meta["company_name"])
+    except (ValueError, TypeError) as e:
+        return jsonify(error=f"The saved cost of goods sold rules are invalid: {e}"), 400
 
     # 1. The PDF to read: an uploaded file, or the attachment of an announcement that holds the
     #    financial statements (chosen by file name, then by a keyword scan of its pages).
@@ -299,7 +305,7 @@ def process():
             f"with {where.title()} ticked, then Deployments → Redeploy.")), 500
     ai_started = time.monotonic()
     res = process_pdf(pdf, scan=scan, pages=pages or None, meta=meta,
-                      effort=f.get("effort", "high"), cache_dir=WORK, deadline=deadline, formats=formats)
+                      effort=f.get("effort", "high"), cache_dir=WORK, deadline=deadline, formats=formats, cogs=cogs)
     timings["ai"] = round(time.monotonic() - ai_started, 1)
     existing = request.files["workbook"].read() if request.files.get("workbook") else None
     data, checks = workbook_bytes(existing, res.normalised, res.meta, formats)
@@ -307,8 +313,39 @@ def process():
     return jsonify(
         scan=scan_info, pages=res.pages, extracted=True, meta=res.meta, usage=res.usage, checks=checks, timings=timings,
         verdict=res.meta.get("verdict"),  # this filing's own: ok only when its figures are confirmed
+        normalised=res.normalised,  # sent back to /api/recompute when the user corrects the COGS lines
         filename=f"{name}.xlsx", workbook_b64=base64.b64encode(data).decode(),
     )
+
+
+@api("industries", "GET", public=True)
+def list_industries():
+    from sgx_fin import industries
+    return jsonify(industries=industries.BUILTIN)
+
+
+@api("recompute", "POST")
+def recompute():
+    """A filing's cost of goods sold from the lines the user ticked: added up again (no AI), gross
+    profit and the verdict worked out again, and the workbook rebuilt (merged into the one sent)."""
+    from sgx_fin import checks, template as T
+    f = request.form
+    try:
+        normalised, meta = json.loads(f.get("normalised") or "null"), json.loads(f.get("meta") or "null")
+        picks = json.loads(f.get("in_cogs") or "null")
+        formats = T.resolve(json.loads(f.get("formats") or "[]"))
+        if not isinstance(normalised, dict) or not isinstance(meta, dict):
+            raise ValueError("send the extraction's normalised figures and meta")
+        chosen = extractor.recompute_cogs(normalised, picks, formats)
+    except (ValueError, TypeError, KeyError, IndexError) as e:
+        return jsonify(error=f"Couldn't recalculate the cost of goods sold: {e}"), 400
+    meta["cogs_basis"] = normalised["income_statement"]["cogs_basis"]
+    meta["verdict"] = checks.verdict(normalised, meta.get("presentation", ""))
+    existing = request.files["workbook"].read() if request.files.get("workbook") else None
+    data, results = workbook_bytes(existing, normalised, meta, formats)
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", meta.get("stock_code") or meta.get("company_name") or "").strip("_") or "financials"
+    return jsonify(normalised=normalised, meta=meta, verdict=meta["verdict"], checks=results, chosen=chosen,
+                   filename=f"{name}.xlsx", workbook_b64=base64.b64encode(data).decode())
 
 
 # ------------------------------------------------------------------ MCP connector for Claude

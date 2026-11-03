@@ -172,7 +172,7 @@ def from_xlsx(data: bytes) -> dict[str, list[dict]]:
     wb = load_workbook(io.BytesIO(data), data_only=True)
     out: dict[str, list[dict]] = {}
     for ws in wb.worksheets:
-        if ws.sheet_state != "visible" or ws.title.lower() in ("checks", "source map", "_store"):
+        if ws.sheet_state != "visible" or ws.title.lower() in ("checks", "source map", "_store", "cogs basis", "transcription"):
             continue
         lines = []
         ours = str(ws["A4"].value or "").strip() == "Period"  # a workbook made by this app

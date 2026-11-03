@@ -134,27 +134,47 @@ filing that states no unit is taken as thousands. Each figure comes back tagged 
 it sits under, so a blank cell can't shift numbers into the wrong period, and period columns are
 grouped by length (full year, half year, quarter) with the latest first.
 
-**Gross profit is never left blank.** When a filing prints it, it is taken as printed. When not,
-the program works it out as Revenue + Cost of Goods Sold (the gross expense, negative), and the gross
-expense comes from, in order:
+**Gross profit is never left blank, and the COGS is explained.** When a filing prints a cost of sales
+it is taken as printed. When not, the cost of goods sold (COGS, the gross expense) is judged by
+**industry** and gross profit = Revenue + COGS:
 
-- a cost of sales / cost of revenue line, as printed;
-- **expenses by nature**: *Raw materials, consumables used and changes in inventories* + *Employee
-  benefits expenses* + *Depreciation and amortisation*, added up by the program;
-- **the AI's judgement**: it screens the statement for the expense lines that are the cost of earning
-  the revenue and gives their sum, e.g. a finance or insurance company without a gross expense line:
-  *Financial cost associated with financial income* + *Provision for credit losses* + *Insurance
-  service expenses* + *Operating cost*. The Source Map lists the lines it added ("A + B + C + D");
-- **banks** (bank format): **Gross Income** = interest income + fee and other non-interest income (an
-  Indian bank's "Total Income"), **Gross Expense** = interest expense + operating expenses +
-  allowances, **Gross Profit** = the difference, at the top of the bank layout.
+1. **Industry**: the AI names the company's industry from a fixed list (manufacturing, trading &
+   retail, food & beverage, property, REITs, construction, shipping & transport, hotels & gaming,
+   energy, mining & plantations, technology & telecoms, healthcare, services, banks, finance,
+   insurance, investment holding, other), with the words in the filing that show it. The program
+   checks that answer against the filing's own lines ("raw materials", "net property income",
+   "interest earned", "vessel"…): it fills in when the AI gives none, and flags a contradiction.
+2. **Every expense line** above operating profit comes back with its figures, marked in or out of
+   COGS by the industry's rule and **why**. Materials always go in (raw materials, consumables,
+   purchases, changes in inventories). E.g. manufacturing: materials + changes in inventories +
+   subcontract and production costs; REITs: property operating expenses (gross profit = net property
+   income); banks and finance companies: financial cost associated with financial income + provision
+   for credit losses + insurance service expenses + operating costs.
+3. **The program adds up** the marked lines (no AI arithmetic), and keeps the list: the workbook's
+   **COGS Basis** sheet shows, per filing, the industry and its evidence, the rule used, an
+   explanation, every line with its figures, in or out and why, and the total. The Source Map names
+   the lines ("judged (Manufacturing & industrials): Raw materials… + Subcontract costs").
 
-Gross profit still blank after the first reading gets a second, targeted look; if it stays blank the
-extraction is not verified. Worked-out lines are marked "computed" in the Source Map, and the
-gross-profit check shows "derived".
+When nothing on the statement is a cost of earning the revenue (an investment holding company's
+dividends), COGS is 0 and gross profit equals revenue, and the sheet says so. Readings without line
+marks fall back to the program's sums (expenses by nature: raw materials + employee benefits +
+depreciation; banks: interest expense + operating expenses + allowances), also explained. Gross
+profit still blank after the first reading gets a second, targeted look; if it stays blank the
+extraction is not verified.
+
+**Your COGS preferences** (web app, **Settings → Cost of goods sold**): edit any industry's rule
+(your version replaces the built-in in this browser), add industries (name, how to recognise it,
+words its statements use, what COGS is), and give a company its own rule by stock code or part of
+its name, with its industry pinned. They are sent with every extraction and come before the
+built-in rules. To correct one filing, open its details: the COGS lines have tick boxes;
+**Recalculate** adds up the ticked lines again without AI and updates the workbook (and the copy in
+your download folder), and **Save as my rule for …** keeps that choice for the company's next
+filings. **Download my rules (JSON)** exports them; put the industries into `industries/cogs.json`
+to make them everyone's default.
 
 Formats are loaded by **`sgx_fin/template.py`**; importing and the editable text form are in
-**`sgx_fin/formats.py`**.
+**`sgx_fin/formats.py`**. Industries and their COGS rules are in **`industries/cogs.json`**, loaded
+by **`sgx_fin/industries.py`**.
 
 ## Web app
 
@@ -168,6 +188,8 @@ yellow, Fraunces + Outfit, rounded cards, one accent colour per company):
 - **Announcement cards**: one per filing, with links to the PDFs in its attachment list and a
   single **Extract** button; progress shows on the card, then the button becomes **Excel**.
   Click a company's name for the pages chosen, the tie-out checks and "Wrong pages?" re-runs.
+- **Industry and COGS** (details): the industry and why, how cost of goods sold was made up, and every
+  expense line with tick boxes to correct it (see *Your COGS preferences* above).
 - **Check failed**: a workbook whose figures aren't verified (a check fails, **0 checks pass**, a
   statement or gross profit is missing) is not shown as "Excel ready". The card turns red with the
   reasons ("Not verified: 0 checks pass · no balance sheet or cash flow · gross profit blank") and a
@@ -217,6 +239,10 @@ Gemini**, Escape, or 30 seconds without an answer carries on with the server's A
 offers **Open in Claude** and **Use Gemini** to change your mind. Long scanned documents come as small previews first so Claude picks the
 statement pages. Text filings still go to the server's AI (`extract_filing`), unless Claude asks
 for them as images; a text page read as images comes with its text layer, so the digits are exact.
+
+Results also give the industry and the cost of goods sold line by line (IN / out, and why). The web
+app's Claude messages carry your COGS rule for the company, which Claude passes to the tools as
+`cogs_rule`, so your preference applies in the chat too.
 
 `submit_statements` and `extract_filing` end with a **verdict** (OK, or NOT VERIFIED with the
 reasons) and tell Claude what to do: re-read failing lines, read the missing totals or statement,
@@ -313,6 +339,7 @@ SGX's terms of use apply to the data you retrieve; keep request volumes modest.
 | Income Statement / Balance Sheet / Cash Flow | The format's rows, one column per period (grouped by length, latest first), `'000` of reporting currency, EPS in cents |
 | Checks | Each filing's verdict first (OK, or NOT VERIFIED and why), then the tie-outs per period: PASS / FAIL (with a note when every figure is 0) / derived / n/a. A filing that isn't verified also gets a red "Not verified" line above every statement |
 | Source Map | For every figure: the company's own line label, filing, PDF, pages and model |
+| COGS Basis | Per filing: the industry and its evidence, the rule used, how the cost of goods sold was made up, every expense line with its figures, in or out and why, and the total |
 | Transcription | Picture filings only: the tables as read from the pictures, corrections in green, doubtful rows in yellow |
 
 ## Tests

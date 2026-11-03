@@ -16,7 +16,7 @@
      "key": "cost_of_sales",
      "label": "Gross Expense",
      "kind": "item",
-     "hint": "Gross expense, negative: interest expense (financial cost associated with financial income) + operating expenses (incl. insurance service expenses) + provisions for credit losses / allowances. Leave out unless one printed line covers all of them (an Indian bank's 'Total Expenditure' leaves out provisions): the program adds them up"
+     "hint": "Gross expense, negative, when printed as one line covering interest expense, operating expenses and provisions (an Indian bank's 'Total Expenditure' leaves out provisions). Otherwise leave out and list the lines in cost_of_sales_basis: the program adds the marked ones (without them, interest expense + operating expenses + allowances)"
     },
     {
      "key": "gross_profit",

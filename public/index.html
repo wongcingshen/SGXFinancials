@@ -241,10 +241,56 @@
         <button type="button" class="btn btn-outline" id="fmtAdd" style="align-self:flex-start"><svg class="i"><use href="#i-plus"/></svg>Add a format</button>
         <p class="help">Each filing is written in the format that fits the company. Import yours from a ShareInvestor export to match it exactly, and add your own entries or formulas. Saved in this browser.</p>
       </div>
+      <div class="form-row" id="cogsSection">
+        <span class="lbl">Cost of goods sold (COGS)</span>
+        <p class="help">When a filing prints no cost of sales, <span data-ai>AI</span> names the company’s industry and marks which expense lines are COGS by that industry’s rule (materials always go in); the program adds them up, and the workbook’s <b>COGS Basis</b> sheet shows every line, in or out, and why. Change a rule, add an industry, or give a company its own.</p>
+        <div class="fmt-list" id="indList"></div>
+        <button type="button" class="btn btn-outline" id="indAdd" style="align-self:flex-start"><svg class="i"><use href="#i-plus"/></svg>Add an industry</button>
+        <span class="lbl" style="margin-top:8px">Company rules</span>
+        <div class="fmt-list" id="coList"></div>
+        <div style="display:flex;gap:8px 14px;flex-wrap:wrap;align-items:center">
+          <button type="button" class="btn btn-outline" id="coAdd"><svg class="i"><use href="#i-plus"/></svg>Add a company rule</button>
+          <button type="button" class="link-btn" id="cogsExport">Download my rules (JSON)</button>
+        </div>
+      </div>
       <div class="notice info" id="serverInfo"></div>
     </div>
   </div>
   <div class="sheet-foot"><button type="button" class="btn btn-ember btn-lg btn-block" data-close>Done</button></div>
+</dialog>
+
+<!-- Cost of goods sold rule editor: an industry's rule, or a company's own -->
+<dialog class="sheet narrow" id="cogsSheet" aria-labelledby="cogsTitle">
+  <div class="sheet-head">
+    <div class="t"><h2 id="cogsTitle">Industry rule</h2><div class="sub muted" id="cogsSub">How cost of goods sold is made up when a filing prints none.</div></div>
+    <button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="sheet-body">
+    <div class="form">
+      <div id="indFields" class="form">
+        <div class="form-row"><label for="indName">Industry</label><input class="input" id="indName" placeholder="e.g. Aquaculture"></div>
+        <div class="form-row"><label for="indApplies">How to recognise it</label>
+          <input class="input" id="indApplies" placeholder="e.g. Fish farms and hatcheries selling fish and fry"></div>
+        <div class="form-row"><label for="indKeywords">Words its statements use (optional)</label>
+          <input class="input" id="indKeywords" placeholder="e.g. fish feed, hatchery, biological assets">
+          <p class="help">Comma-separated. They let the program check the industry the AI names against the filing’s own lines.</p></div>
+      </div>
+      <div id="coFields" class="form" hidden>
+        <div class="form-row"><label for="coMatch">Stock code, or part of the company name</label>
+          <input class="input" id="coMatch" placeholder="e.g. F13 or FU YU"></div>
+        <div class="form-row"><label for="coIndustry">Industry</label><select class="input" id="coIndustry"></select></div>
+      </div>
+      <div class="form-row">
+        <label for="cogsText">Cost of goods sold is</label>
+        <textarea class="input" id="cogsText" rows="6" placeholder="e.g. Raw materials and consumables used + changes in inventories + subcontract costs. Leave out staff costs and depreciation."></textarea>
+        <p class="help" id="cogsHelp">Name the lines that go in and those that stay out, as filings call them. Materials always go in.</p>
+      </div>
+    </div>
+  </div>
+  <div class="sheet-foot">
+    <button type="button" class="btn btn-ember btn-lg btn-block" id="cogsSave">Save rule</button>
+    <div style="display:flex;justify-content:center"><button type="button" class="link-btn" id="cogsDelete" hidden style="color:var(--trip-lacquer)">Remove</button></div>
+  </div>
 </dialog>
 
 <!-- Statement format editor -->
