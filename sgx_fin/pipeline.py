@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from . import checks, extractor, pictures
+from .checks import STATEMENT_NAMES, join_or
 from .page_scanner import ScanResult, page_texts, scan_pdf
 from .sgx_client import Announcement, SGXClient
 
@@ -68,7 +69,8 @@ def cached_scan(pdf: Path) -> ScanResult | None:
 
 def pick_best_pdf(pdfs: list[Path], scans: dict | None = None) -> tuple[Path, ScanResult] | None:
     """The attachment that holds the financial statements: by what its pages contain, preferring
-    one that isn't a presentation or release, then by how financial its name looks."""
+    one that isn't a presentation or release (by name or, for slides, by how it was made and its
+    shape), then by how financial its name looks."""
     scans = {} if scans is None else scans
     best = None
     for pdf in pdfs:
@@ -82,7 +84,7 @@ def pick_best_pdf(pdfs: list[Path], scans: dict | None = None) -> tuple[Path, Sc
         ns = name_score(pdf.name)
         # A results PDF whose statements are pictures counts as a candidate even though the
         # keyword scan found nothing in it; presentations and releases never do.
-        rank = (ns >= 0 and (found > 0 or res.needs_vision), found, ns, top)
+        rank = (ns >= 0 and not res.presentation and (found > 0 or res.needs_vision), found, ns, top)
         if best is None or rank > best[0]:
             best = (rank, pdf, res)
     return (best[1], best[2]) if best else None
@@ -102,6 +104,8 @@ def choose_financial_pdf(client: SGXClient, links: list[tuple[str, str]], folder
             continue
         urls[pdf] = url
         res = pick_best_pdf([pdf], scans)
+        if res and res[1].presentation:
+            continue  # slides: the formal statements may be in another attachment
         if res and res[1].found_all and name_score(name) >= 0 and name_score(pdf.name) >= 0:
             break  # the financial statements are here; leave the other attachments alone
         if res and res[1].needs_vision and name_score(name) == 1:
@@ -158,12 +162,13 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
                 reading = None
     result.pages = pages
 
-    def run(recheck: str = ""):
+    def run(recheck: str = "", gaps: str = ""):
         if reading:
             return extractor.extract_text(pdf, reading.pages, pictures.as_text(reading.tables), model=model, effort=effort,
-                                          cache_dir=cache_dir, deadline=deadline, formats=formats, recheck=recheck)
+                                          cache_dir=cache_dir, deadline=deadline, formats=formats, recheck=recheck, gaps=gaps)
         return extractor.extract(pdf, pages, model=model, effort=effort, cache_dir=cache_dir, vision=vision,
-                                 locate=locate, deadline=deadline, formats=formats, context=context, recheck=recheck)
+                                 locate=locate, deadline=deadline, formats=formats, context=context, recheck=recheck,
+                                 gaps=gaps)
 
     ex = run()
     normalised = extractor.normalise(ex.data, formats)
@@ -171,17 +176,22 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
     if reading:
         pictures._add_usage(usage, reading.usage)
 
-    # Totals that don't add up: one more look, pointed at the failing lines (from the copied tables
-    # for pictures, which is quick; from the pages otherwise).
+    # Totals that don't add up, or gross profit left blank: one more look, pointed at the failing lines
+    # (from the copied tables for pictures, which is quick; from the pages otherwise).
     fails = checks.failures(normalised)
+    gaps = checks.gross_profit_gaps(normalised)
     rechecked = None
-    if fails and deadline - time.monotonic() > (40 if reading else 70):
+    if (fails or gaps) and deadline - time.monotonic() > (40 if reading else 70):
         factor = extractor.UNIT_FACTORS.get(ex.data.get("unit") or extractor.DEFAULT_UNIT, 1000) / extractor.T.OUTPUT_UNIT
         try:
-            ex2 = run(checks.describe(fails, normalised, factor))
-            fixed = checks.reconcile(normalised, extractor.normalise(ex2.data, formats))
+            ex2 = run(checks.describe(fails, normalised, factor), checks.describe_gaps(gaps, normalised) if gaps else "")
+            second = extractor.normalise(ex2.data, formats)
+            fixed = checks.reconcile(normalised, second)
+            filled = extractor.fill_gross_profit(normalised, second) if gaps else []
             pictures._add_usage(usage, ex2.usage)
-            rechecked = {"failed": len(fails), "fixed": fixed, "still_failing": len(checks.failures(normalised))}
+            rechecked = {"failed": len(fails), "fixed": fixed, "still_failing": len(checks.failures(normalised)),
+                         "gross_profit_blank": len(gaps), "gross_profit_filled": filled,
+                         "gross_profit_still_blank": len(checks.gross_profit_gaps(normalised))}
         except Exception as e:
             notes.append(f"A second look at the failing checks failed: {e}")
 
@@ -204,6 +214,7 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
         "pages": ",".join(map(str, pages)),
         "model": ex.model if not reading or reading.model == ex.model else f"{reading.model} (copied) + {ex.model}",
         "vision": vision,
+        "presentation": scan.presentation,
         "located_by_ai": locate or bool(located),
         # Where the AI says each statement was, as page numbers of the original PDF.
         "found_pages": {st: found(st) for st in ("income_statement", "balance_sheet", "cash_flow")},
@@ -216,6 +227,8 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
         result.meta["transcription"] = reading.tables
     if rechecked:
         result.meta["rechecked"] = rechecked
+    # Whether the figures can be relied on: the web app shows a failure, not "Excel ready", when not.
+    result.meta["verdict"] = checks.verdict(normalised, scan.presentation)
     return result
 
 
@@ -225,8 +238,12 @@ NOTICE = re.compile(r"intends? to (?:announce|release)|will (?:be )?(?:announc|r
 
 
 def not_results_reason(pdf: Path, scan: ScanResult) -> str | None:
-    """Why a PDF is not a financial results document (a release-date notice, a press release...),
-    or None. Decided without AI so such filings never reach it."""
+    """Why a PDF is not a financial results document (a release-date notice, a press release, a
+    presentation without the formal statements...), or None. Decided without AI so such filings
+    never reach it."""
+    if scan.presentation and not scan.formal_statements:
+        missing = [STATEMENT_NAMES[st] for st in STATEMENT_NAMES if st not in scan.titled]
+        return f"It's a presentation ({scan.presentation}) without the formal financial statements (no {join_or(missing)})."
     if any(scan.selected.values()) or scan.image_only_pages:
         return None  # statements found, or pictures that may hold them
     dense = max((p.numeric_ratio for p in scan.pages), default=0)

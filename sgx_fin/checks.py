@@ -1,12 +1,17 @@
 """Arithmetic tie-outs of the statements (parts add up to their printed total).
 
-Used three ways: to put right a sign the AI read backwards, to pick which lines to read again when
-a total doesn't add up, and to report PASS / FAIL on the workbook's Checks sheet.
+Used four ways: to put right a sign the AI read backwards, to pick which lines to read again when
+a total doesn't add up, to report PASS / FAIL on the workbook's Checks sheet, and to give each
+extraction a verdict: can its figures be relied on?
 
 Each check is (statement, name, parts, total). A part starting with "-" is subtracted; one ending
 in "?" may be missing (it then counts as nothing). A check runs when its total and every required
 part have a figure; it is skipped entirely when none of its lines exist (a check for the other
 format, bank vs general).
+
+A PASS has to prove something. A check whose figures are all 0 fails (0 + 0 = 0 only shows that
+nothing was read), and the slack allowed is the rounding of the figures involved, nothing more, so a
+misread digit can't hide inside a percentage of a large total.
 """
 
 from __future__ import annotations
@@ -47,9 +52,30 @@ def terms(parts: list[str]) -> list[tuple[int, str, bool]]:
     return [(-1 if p.startswith("-") else 1, p.lstrip("-").rstrip("?"), p.endswith("?")) for p in parts]
 
 
-def tolerance(total: float, step: float = 1.0) -> float:
-    """Rounding slack in output units: 0.2% of the total, at least two of the filing's own units."""
-    return max(2.0, 2.0 * step, abs(total) * 0.002)
+ZERO = "every figure is 0"
+STATEMENT_NAMES = {"income_statement": "income statement", "balance_sheet": "balance sheet",
+                   "cash_flow": "cash flow statement"}
+
+
+def _decimals(x: float) -> int:
+    """Decimal places (0-3) a figure shows, from its value in the filing's own unit."""
+    for d in range(4):
+        y = x * 10 ** d
+        if abs(y - round(y)) <= abs(y) * 1e-12 + 1e-9:
+            return d
+    return 3
+
+
+def tolerance(figures: list[float], step: float = 1.0) -> float:
+    """Rounding slack in output units ('000) for figures that should add up.
+
+    Each figure was printed rounded to the filing's unit (`step` output units), or to its decimals
+    when every figure shows some (crores with paise), so the figures of a check can disagree by half
+    of that each; never less than two of it. No share of the total: 0.2% of a bank's total assets
+    would let a line be misread by billions."""
+    places = min((_decimals(v / step) for v in figures), default=0) if step else 0
+    unit = max(step / 10 ** places, 0.001)  # figures are kept to 3 decimals of '000
+    return max(2 * unit, unit * len(figures) / 2)
 
 
 def run(statement: str, get, labels: dict | None = None, step: float = 1.0) -> list[dict]:
@@ -64,16 +90,21 @@ def run(statement: str, get, labels: dict | None = None, step: float = 1.0) -> l
         if all(get(k) is None for k in (*keys, total)):
             continue
         s = diff = None
+        note = ""
         if str(labels.get(total, "")).startswith(("computed", "formula")):
             status = "derived"  # the total was calculated, not printed
         elif get(total) is None or any(get(k) is None for _, k, opt in ts if not opt):
             status = "n/a"
         else:
+            figures = [get(k) for k in keys if get(k) is not None] + [get(total)]
             s = sum(sign * (get(k) or 0) for sign, k, _ in ts)
             diff = round(s - get(total), 3)
-            status = "PASS" if abs(diff) <= tolerance(get(total), step) else "FAIL"
+            if not any(figures):  # 0 + 0 = 0 proves nothing: lines read as 0 that may not be there at all
+                status, note = "FAIL", ZERO
+            else:
+                status = "PASS" if abs(diff) <= tolerance(figures, step) else "FAIL"
         out.append({"statement": st, "check": name, "status": status, "difference": diff,
-                    "parts": [k for k in keys if get(k) is not None], "total": total})
+                    "parts": [k for k in keys if get(k) is not None], "total": total, "note": note})
     return out
 
 
@@ -137,10 +168,85 @@ def describe(fails: list[dict], normalised: dict, factor: float = 1.0) -> str:
         vals = normalised[f["statement"]]["values"]
         show = lambda k: _fmt((vals.get(k) or [None])[f["index"]], factor)  # noqa: E731
         parts = " + ".join(f"{k} {show(k)}" for k in f["parts"])
-        lines.append(f"- {f['statement']}, column \"{f['label'] or f['period_end']}\" ({f['period_end']}, "
-                     f"{f['months']} months): {f['check']} fails: {parts} does not equal {f['total']} {show(f['total'])} "
-                     f"(off by {_fmt(f['difference'], factor)})")
+        where = (f"- {f['statement']}, column \"{f['label'] or f['period_end']}\" ({f['period_end']}, "
+                 f"{f['months']} months): {f['check']}")
+        if f.get("note") == ZERO:
+            lines.append(f"{where}: every figure is 0 ({parts}, {f['total']} {show(f['total'])}), which proves nothing. "
+                         "Give these lines' printed figures; a line that isn't printed is left out, not written as 0.")
+        else:
+            lines.append(f"{where} fails: {parts} does not equal {f['total']} {show(f['total'])} "
+                         f"(off by {_fmt(f['difference'], factor)})")
     return "\n".join(lines)
+
+
+def gross_profit_gaps(normalised: dict) -> list[int]:
+    """Income statement columns with figures but no gross profit (printed or worked out)."""
+    block = normalised.get("income_statement") or {}
+    vals, n = block.get("values") or {}, len(block.get("periods") or [])
+    gp = vals.get("gross_profit") or [None] * n
+    return [i for i in range(n) if gp[i] is None
+            and any((v or [None] * n)[i] is not None for k, v in vals.items() if not k.startswith("eps"))]
+
+
+def describe_gaps(gaps: list[int], normalised: dict) -> str:
+    """Gross profit gaps as a line for the AI to act on."""
+    periods = normalised["income_statement"]["periods"]
+    cols = ", ".join(f"\"{periods[i].get('label') or periods[i]['period_end']}\"" for i in gaps)
+    return (f"- income_statement, column(s) {cols}: gross profit is blank. It must not be: give gross_profit if printed, "
+            "else cost_of_sales, the gross expense: the cost of sales line if printed, otherwise use your judgement and "
+            "add up the expense lines that are the cost of earning the revenue (for a bank, finance or insurance company "
+            "e.g. financial cost associated with financial income + provision for credit losses + insurance service "
+            "expenses + operating costs), negative, source labels joined with \" + \". The program then works out "
+            "gross profit as revenue + cost_of_sales.")
+
+
+def join_or(items: list[str]) -> str:
+    """['a', 'b', 'c'] -> 'a, b or c'."""
+    return " or ".join([", ".join(items[:-1]), items[-1]] if len(items) > 2 else items)
+
+
+def has_figures(block: dict | None) -> bool:
+    return any(v is not None for vals in ((block or {}).get("values") or {}).values() for v in vals)
+
+
+def verdict(normalised: dict, presentation: str = "") -> dict:
+    """Whether an extraction's figures can be relied on: {"ok", "pass", "fail", "reasons", "summary"
+    (a few words for a card), "failing" (its failing checks)}.
+
+    Good only when at least one tie-out passes, none fails, each statement has figures and gross
+    profit isn't blank. Nothing passing counts as a failure too: figures that no printed total
+    confirms (a presentation's highlights, a page read as zeros) are not a result."""
+    results = []
+    for st, block in normalised.items():
+        periods = block.get("periods") or []
+        for i, p in enumerate(periods):
+            period = f"{p['months']}M to {p['period_end']}" if p.get("months") else p["period_end"]
+            results += [{**c, "period": period} for c in
+                        run(st, column(block.get("values") or {}, len(periods), i), block.get("labels"), block.get("step", 1.0))]
+    passed = sum(c["status"] == "PASS" for c in results)
+    failed = [c for c in results if c["status"] == "FAIL"]
+    reasons, short = [], []  # in full, and in a few words for a card
+    if failed:
+        zero = sum(c["note"] == ZERO for c in failed)
+        reasons.append(f"{len(failed)} tie-out check{'s fail' if len(failed) > 1 else ' fails'}"
+                       + (f" ({zero} with every figure 0)" if zero else ""))
+        short.append(f"{len(failed)} check{'s fail' if len(failed) > 1 else ' fails'}")
+    if not passed:
+        reasons.append("no tie-out check passes, so nothing confirms the figures")
+        short.append("0 checks pass")
+    missing = [st for st in STATEMENT_NAMES if not has_figures(normalised.get(st))]
+    if missing:
+        reasons.append(f"no {join_or([STATEMENT_NAMES[st] for st in missing])} found")
+        short.append(f"no {join_or([STATEMENT_NAMES[st].replace(' statement', '') for st in missing])}")
+    if "income_statement" not in missing and gross_profit_gaps(normalised):
+        reasons.append("gross profit is blank")
+        short.append("gross profit blank")
+    if reasons and presentation:
+        reasons.append(f"the PDF is a presentation ({presentation}), not the formal financial statements")
+        short.append("slides only")
+    failing = [{k: c[k] for k in ("statement", "period", "check", "difference", "note")} for c in failed[:12]]
+    return {"ok": not reasons, "pass": passed, "fail": len(failed), "reasons": reasons, "summary": " · ".join(short),
+            "failing": failing}
 
 
 def _fmt(v, factor: float) -> str:
@@ -171,15 +277,20 @@ def reconcile(first: dict, second: dict) -> list[str]:
                 progress = False
                 for c in (c for c in res if c["status"] == "FAIL"):
                     keys = [k for k in (*c["parts"], c["total"]) if get_b(k) is not None and get_b(k) != get(k)]
+                    if not keys and c["note"] == ZERO and all(get_b(k) is None for k in (*c["parts"], c["total"])):
+                        keys = [*c["parts"], c["total"]]  # zeros the second reading leaves out: not printed
                     if not keys:
                         continue
                     old = {k: get(k) for k in keys}
                     for k in keys:
                         a["values"].setdefault(k, [None] * n)[i] = get_b(k)
-                    after = _passing(run(st, get, a["labels"], step))
-                    if c["check"] in after and before <= after:
+                    res_after = run(st, get, a["labels"], step)
+                    after = _passing(res_after)
+                    cleared = c["note"] == ZERO and all(x["check"] != c["check"] or x["status"] != "FAIL" for x in res_after)
+                    if (c["check"] in after or cleared) and before <= after:
                         fixed.append(f"{st} {p['period_end']} {c['check']}: " + ", ".join(
-                            f"{k} {_fmt(old[k], 1)} -> {_fmt(get(k), 1)}" for k in keys))
+                            f"{k} {_fmt(old[k], 1)} -> {'left out (not printed)' if get(k) is None else _fmt(get(k), 1)}"
+                            for k in keys))
                         progress = True
                         break
                     for k in keys:

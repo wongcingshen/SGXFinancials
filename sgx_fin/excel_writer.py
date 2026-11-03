@@ -1,8 +1,8 @@
 """Write / merge extracted statements into a ShareInvestor-style workbook (one per company).
 
 Sheets: Income Statement, Balance Sheet, Cash Flow (row labels down column A,
-one column per period), Checks (arithmetic tie-outs), Source Map (which
-company line each figure came from), and for filings whose statements are
+one column per period), Checks (each filing's verdict, then the arithmetic
+tie-outs), Source Map (which company line each figure came from), and for filings whose statements are
 pictures, Transcription (the tables as read from the pictures, re-read figures
 and rows that still don't add up marked). Every run merges into the existing
 workbook, so quarterly / half-year / full-year filings accumulate as columns.
@@ -125,6 +125,10 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
     # A bank gets the bank layout; the newest filing decides if a workbook somehow has both.
     fmt = next((r.get("format") for r in sorted(records, key=lambda r: r["period_end"], reverse=True)
                 if r.get("format")), meta.get("format") or "general")
+    verdicts = filing_verdicts(records)
+    bad = [v for v in verdicts if not v["verdict"].get("ok")]
+    warning = ("Not verified: " + " | ".join(f"{v['filing']}: {'; '.join(v['verdict'].get('reasons') or [])}" for v in bad[:2])
+               + ". Check these figures against the PDF before relying on them (Checks sheet).") if bad else ""
     for st in T.STATEMENT_IDS:
         rows, title = T.rows_for(st, fmt, formats), T.title_for(st, fmt, formats)
         ws = wb.create_sheet(T.STATEMENT_TITLES[st])  # fixed sheet names; the format's title goes in A2
@@ -132,10 +136,10 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
         # Group columns by length (full year, 9M, half year, quarter), latest first within each,
         # so quarters and years aren't interleaved; balance sheet dates simply by date.
         recs.sort(key=lambda r: (r["months"], r["period_end"]), reverse=T.LATEST_FIRST)
-        _write_statement(ws, title, rows, recs, company, meta.get("stock_code", ""), currency)
+        _write_statement(ws, title, rows, recs, company, meta.get("stock_code", ""), currency, warning)
 
     checks = run_checks(records)
-    _write_checks(wb.create_sheet("Checks"), checks)
+    _write_checks(wb.create_sheet("Checks"), checks, verdicts)
     _write_sources(wb.create_sheet("Source Map"), records, formats)
 
     if tables:
@@ -155,11 +159,14 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
     return buf.getvalue(), checks
 
 
-def _write_statement(ws, title, rows, recs, company, code, currency):
+def _write_statement(ws, title, rows, recs, company, code, currency, warning=""):
     ws["A1"] = f"{company} ({code})" if code else company
     ws["A1"].font = Font(bold=True, size=13)
     ws["A2"] = f"{title} — {currency} {T.OUTPUT_UNIT_LABEL} (EPS in cents)"
     ws["A2"].font = Font(italic=True, color="595959")
+    if warning:  # a filing whose figures nothing confirms: said where the figures are, not only on Checks
+        ws["A3"] = warning
+        ws["A3"].font = Font(bold=True, color="9C0006")
 
     hdr = 4
     ws.cell(hdr, 1, "Period").font = Font(bold=True, color="FFFFFF")
@@ -211,20 +218,49 @@ def run_checks(records: list[dict]) -> list[dict]:
         v = r["values"]
         for c in C.run(r["statement"], v.get, r.get("labels"), r.get("step", 1.0)):
             out.append({"statement": c["statement"], "period": period_label(r["period_end"], r["months"]),
-                        "check": c["check"], "status": c["status"], "difference": c["difference"]})
+                        "check": c["check"], "status": c["status"], "difference": c["difference"], "note": c["note"]})
     return out
 
 
-def _write_checks(ws, checks):
-    ws.append(["Statement", "Period", "Check", "Status", f"Difference ({T.OUTPUT_UNIT_LABEL})"])
-    for c in ws[1]:
+def filing_verdicts(records: list[dict]) -> list[dict]:
+    """The verdict each filing in the workbook got when it was read, newest first:
+    [{"filing", "periods", "verdict"}]. Workbooks made before verdicts existed have none."""
+    out: dict[str, dict] = {}
+    for r in sorted(records, key=lambda r: (r["period_end"], r["months"]), reverse=True):
+        if not isinstance(r.get("verdict"), dict):
+            continue
+        e = out.setdefault(r.get("filing") or r.get("source_pdf") or "This filing",
+                           {"filing": r.get("filing") or r.get("source_pdf") or "This filing", "periods": [], "verdict": r["verdict"]})
+        label = period_label(r["period_end"], r["months"])
+        if label not in e["periods"]:
+            e["periods"].append(label)
+    return list(out.values())
+
+
+def _write_checks(ws, checks, verdicts=()):
+    for v in verdicts:  # each filing's verdict first: can its figures be relied on?
+        ok = v["verdict"].get("ok")
+        why = ("; ".join(v["verdict"].get("reasons") or []) if not ok else
+               f"{v['verdict'].get('pass', 0)} tie-out checks pass and none fails; every statement and gross profit found")
+        ws.append([f"{'OK' if ok else 'NOT VERIFIED'} — {v['filing']} ({', '.join(v['periods'])}): {why}"])
+        r = ws.max_row
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=6)
+        cell = ws.cell(r, 1)
+        cell.font = Font(bold=True, color="006100" if ok else "9C0006")
+        cell.fill = PatternFill("solid", fgColor="C6EFCE" if ok else "FFC7CE")
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+        ws.row_dimensions[r].height = 32
+    if verdicts:
+        ws.append([])
+    ws.append(["Statement", "Period", "Check", "Status", f"Difference ({T.OUTPUT_UNIT_LABEL})", "Note"])
+    for c in ws[ws.max_row]:
         c.font = Font(bold=True, color="FFFFFF")
         c.fill = HEAD_FILL
     colours = {"PASS": "C6EFCE", "FAIL": "FFC7CE", "n/a": "EDEDED", "derived": "FFF2CC"}
     for ch in checks:
-        ws.append([ch["statement"], ch["period"], ch["check"], ch["status"], ch["difference"]])
+        ws.append([ch["statement"], ch["period"], ch["check"], ch["status"], ch["difference"], ch.get("note", "")])
         ws.cell(ws.max_row, 4).fill = PatternFill("solid", fgColor=colours[ch["status"]])
-    for col, w in zip("ABCDE", (18, 16, 50, 10, 18)):
+    for col, w in zip("ABCDEF", (18, 16, 50, 10, 18, 22)):
         ws.column_dimensions[col].width = w
 
 
@@ -286,8 +322,9 @@ def _write_sources(ws, records, formats=None):
         c.fill = HEAD_FILL
     labels = T.labels(formats)
     for r in records:
+        own = {row.key: row.label for row in T.rows_for(r["statement"], r.get("format"), formats)}  # a bank's own words
         for k in r["values"]:
-            ws.append([r["statement"], period_label(r["period_end"], r["months"]), labels.get(k, k),
+            ws.append([r["statement"], period_label(r["period_end"], r["months"]), own.get(k) or labels.get(k, k),
                        r["labels"].get(k, ""), r.get("filing", ""), r.get("source_pdf", ""),
                        r.get("pages", ""), r.get("model", "")])
     for col, w in zip("ABCDEFGH", (18, 16, 40, 60, 50, 40, 12, 18)):

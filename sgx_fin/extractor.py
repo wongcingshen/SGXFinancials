@@ -145,8 +145,12 @@ Rules:
 - Income statement and cash flow periods are durations: months = 3 (quarter ended), 6 (half year / six months ended), 9 (nine months ended) or 12 (year ended). Balance sheet columns are dates: months = 0. period_end is the column's end date as YYYY-MM-DD.
 - Map each template key to the line the company reports. If a template line is a sum of several reported lines (e.g. "Reserves" = retained earnings + other reserves), add them and list the source labels joined with " + ". If a company line has no matching key, fold it into the closest "Other ..." key.
 - Only include a key if the filing gives the figure (or it is a direct sum of shown figures). Omit keys you cannot support; never invent numbers.
-- Expenses by nature (general format): when the income statement has no cost of sales line and lists expenses by nature instead, fill raw_materials (raw materials, consumables used and changes in inventories), employee_benefits and depreciation_amortisation from the face of the statement, and leave cost_of_sales and gross_profit out unless they are printed. The program derives them.
-- Totals (gross profit, net interest income, total assets, net cash from operating activities...) must be the printed totals, not your own arithmetic, when they are printed; leave them out when not printed.
+- Gross profit must never end up blank, so check whether it is printed. If it is, give it as printed. If not, leave gross_profit out: the program works it out as revenue + cost_of_sales, so cost_of_sales (the gross expense) is what you must provide:
+  - a cost of sales / cost of revenue line: as printed;
+  - expenses by nature (general format): fill raw_materials (raw materials, consumables used and changes in inventories), employee_benefits and depreciation_amortisation from the face of the statement and leave cost_of_sales out: the program adds them up;
+  - bank format: map interest expense, operating expenses and allowances to their own keys and the program adds them up; give revenue / cost_of_sales only when one printed line is the whole gross income ('Total Income' = interest earned + other income) or the whole gross expense;
+  - otherwise use your judgement: screen the statement for the expense lines that are the cost of earning the revenue and give their sum as cost_of_sales, negative, with the source labels joined with " + ". E.g. a bank, finance or insurance company without a gross expense line: financial cost associated with financial income + provision for credit losses + insurance service expenses + operating costs; a service company: its direct costs of services.
+- Other totals (net interest income, total assets, net cash from operating activities...) must be the printed totals, not your own arithmetic, when they are printed; leave them out when not printed.
 - `page_numbers` are the page numbers within the attached excerpt (1-based) the statement came from.
 - Put caveats (restatements, unusual presentation, standalone figures used) in `notes`.
 
@@ -268,18 +272,21 @@ def _instruction(pdf: Path, pages: list[int], vision: bool = False, locate: bool
 RECHECK = ("\n\nA first reading of these pages did not add up:\n{fails}\nRead the lines involved again, digit by "
            "digit, and check each figure's column, sign and template line (e.g. a total taken for a sub-total). Then "
            "return the whole template again with the figures exactly as printed.")
+GAPS = ("\n\nA first reading of these pages left gross profit blank:\n{gaps}\nReturn the whole template again, "
+        "figures exactly as printed, with cost_of_sales filled.")
 
 
 def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str = "high",
             cache_dir: Path | None = None, client=None, vision: bool = False,
             locate: bool = False, deadline: float | None = None, formats: dict | None = None,
-            context: str = "", recheck: str = "") -> Extraction:
+            context: str = "", recheck: str = "", gaps: str = "") -> Extraction:
     """Send only `pages` of `pdf` to the AI and return the parsed JSON.
 
     Picture pages (vision=True) go to the main provider as sharp images (Gemini: Flash, then
     Flash-Lite), with GLM 5.3 Flash behind it when GLM_FLASH is set; everything else goes to the
     main provider as a PDF excerpt. `context` is added to the instruction (what the pages are);
-    `recheck` lists checks a first reading failed, for a second look. `deadline`
+    `recheck` lists checks a first reading failed, and `gaps` where it left gross profit blank, for a
+    second look. `deadline`
     (time.monotonic()) bounds the whole step.
     """
     from . import glm
@@ -298,6 +305,8 @@ def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str =
     instruction = _instruction(pdf, pages, vision, locate) + (f"\n\n{context}" if context else "")
     if recheck:
         instruction += RECHECK.format(fails=recheck)
+    if gaps:
+        instruction += GAPS.format(gaps=gaps)
     failures = []
     for who in attempts:
         if who == "glm" and failures and deadline - time.monotonic() < 45:
@@ -347,7 +356,7 @@ Fill the template from them, as you would from the statements themselves. `perio
 
 def extract_text(pdf: Path, pages: list[int], tables: str, model: str | None = None, effort: str = "high",
                  cache_dir: Path | None = None, client=None, deadline: float | None = None,
-                 formats: dict | None = None, recheck: str = "") -> Extraction:
+                 formats: dict | None = None, recheck: str = "", gaps: str = "") -> Extraction:
     """Fill the template from tables already transcribed as text (picture filings): no pictures,
     so the main provider's text model maps them (GLM when there is no other key)."""
     from . import glm
@@ -360,6 +369,8 @@ def extract_text(pdf: Path, pages: list[int], tables: str, model: str | None = N
     if recheck:
         instruction += RECHECK.format(fails=recheck).replace("Read the lines involved again, digit by digit, and check",
                                                              "Look at the lines involved again and check")
+    if gaps:
+        instruction += GAPS.format(gaps=gaps)
     attempts = ([prov] if prov else []) + (["glm"] if glm.api_key() else [])
     if not attempts:
         raise RuntimeError("No AI key configured: set GEMINI_API_KEY")
@@ -550,26 +561,94 @@ def _gemini_result(resp, name: str) -> Extraction:
 COGS_BY_NATURE = ("raw_materials", "employee_benefits", "depreciation_amortisation")
 
 
-def _derive_gross_profit(values: dict, labels: dict, n: int) -> None:
-    """No cost of sales line (expenses presented by nature): Cost of Goods Sold = raw materials,
-    consumables used and changes in inventories + employee benefits + depreciation & amortisation,
-    and Gross Profit = Revenue - Cost of Goods Sold."""
-    if any(v is not None for v in values.get("cost_of_sales", [])):
-        return
+def _derive_gross_profit(values: dict, labels: dict, n: int, by_formula: bool = False) -> None:
+    """Gross profit, never left blank when it can be worked out.
+
+    Cost of Goods Sold (the gross expense) is the printed line or the AI's judged sum of cost lines;
+    without either, when expenses are presented by nature, raw materials, consumables used and changes
+    in inventories + employee benefits + depreciation and amortisation. Gross Profit = Revenue + Cost of
+    Goods Sold wherever none is printed (unless the format has a formula of its own for it)."""
+    has = lambda k: any(v is not None for v in values.get(k, []))  # noqa: E731
     col = lambda k: values.get(k) or [None] * n  # noqa: E731
-    rm, eb, da = (col(k) for k in COGS_BY_NATURE)
-    cogs = [None if rm[i] is None and eb[i] is None
-            else round(-sum(abs(x) for x in (rm[i], eb[i], da[i]) if x is not None), 3)
-            for i in range(n)]
-    if all(c is None for c in cogs):
+    if not has("cost_of_sales"):
+        rm, eb, da = (col(k) for k in COGS_BY_NATURE)
+        cogs = [None if rm[i] is None and eb[i] is None
+                else round(-sum(abs(x) for x in (rm[i], eb[i], da[i]) if x is not None), 3)
+                for i in range(n)]
+        if any(c is not None for c in cogs):
+            values["cost_of_sales"] = cogs
+            labels["cost_of_sales"] = ("computed (no cost of sales reported): raw materials, consumables used and "
+                                       "changes in inventories + employee benefits + depreciation and amortisation")
+    if by_formula or has("gross_profit") or not has("cost_of_sales") or not has("revenue"):
         return
-    values["cost_of_sales"] = cogs
-    labels["cost_of_sales"] = ("computed (no cost of sales reported): raw materials, consumables used and "
-                               "changes in inventories + employee benefits + depreciation and amortisation")
-    if not any(v is not None for v in values.get("gross_profit", [])):
-        values["gross_profit"] = [None if r is None or c is None else round(r + c, 3)
-                                  for r, c in zip(col("revenue"), cogs)]
-        labels["gross_profit"] = "computed: revenue - derived cost of goods sold"
+    cogs = values["cost_of_sales"]
+    if any(c is not None and c > 0 for c in cogs):  # a cost read without its brackets
+        values["cost_of_sales"] = cogs = [None if c is None else -abs(c) for c in cogs]
+        labels["cost_of_sales"] = f"{labels.get('cost_of_sales', '')} (sign corrected: a cost)".strip()
+    gp = [None if r is None or c is None else round(r + c, 3) for r, c in zip(col("revenue"), cogs)]
+    if any(v is not None for v in gp):
+        values["gross_profit"] = gp
+        labels["gross_profit"] = "computed: revenue + cost of goods sold (the gross expense)"
+
+
+def _derive_bank_gross(values: dict, labels: dict, n: int) -> None:
+    """A bank's gross lines, which banks rarely print: Gross Income = interest income + fee and other
+    non-interest income; Gross Expense = interest expense + operating expenses + allowances, the costs of
+    earning that income. A bank that prints no gross interest income gets the same gross profit from its
+    net total operating income less operating expenses and allowances."""
+    has = lambda k: any(v is not None for v in values.get(k, []))  # noqa: E731
+    if not (has("interest_income") or has("total_operating_income")):
+        return  # not a bank's income statement
+    col = lambda k: values.get(k) or [None] * n  # noqa: E731
+    ii, ie, fee, oth, toi, opex, allw = (col(k) for k in (
+        "interest_income", "interest_expense", "fee_income", "other_non_interest_income", "total_operating_income",
+        "total_operating_expenses", "allowances"))
+    rev, cost, net = [None] * n, [None] * n, False
+    for i in range(n):
+        if ii[i] is not None:
+            rev[i], parts = round(ii[i] + (fee[i] or 0) + (oth[i] or 0), 3), (ie[i], opex[i], allw[i])
+        elif toi[i] is not None:
+            rev[i], parts, net = toi[i], (opex[i], allw[i]), True
+        else:
+            continue
+        if opex[i] is not None:
+            cost[i] = round(sum(x or 0 for x in parts), 3)
+    if not has("revenue") and any(v is not None for v in rev):
+        values["revenue"] = rev
+        labels["revenue"] = ("computed: total operating income (no gross interest income printed)" if net
+                             else "computed: interest income + non-interest income (gross income)")
+    if not has("cost_of_sales") and any(v is not None for v in cost):
+        values["cost_of_sales"] = cost
+        labels["cost_of_sales"] = ("computed: operating expenses + allowances" if net
+                                   else "computed: interest expense + operating expenses + allowances (gross expense)")
+
+
+def fill_gross_profit(first: dict, second: dict) -> list[str]:
+    """When a first reading has no gross profit at all, take what a second reading found (matched by
+    period): a printed gross profit, or the gross expense it judged, from which gross profit is worked
+    out against the first reading's revenue. Changes `first` in place; returns the lines taken."""
+    a, b = first.get("income_statement"), second.get("income_statement")
+    if not a or not b or any(v is not None for v in a["values"].get("gross_profit", [])):
+        return []
+    n, nb = len(a["periods"]), len(b["periods"])
+    where = {(p["period_end"], p["months"]): j for j, p in enumerate(b["periods"])}
+    printed = not str(b["labels"].get("gross_profit", "")).startswith(("computed", "formula"))
+    keys = ("revenue", "cost_of_sales", "gross_profit") if printed else ("revenue", "cost_of_sales")
+    took = set()
+    for i, p in enumerate(a["periods"]):
+        j = where.get((p["period_end"], p["months"]))
+        if j is None:
+            continue
+        for k in keys:
+            v = (b["values"].get(k) or [None] * nb)[j]
+            if v is not None and (a["values"].get(k) or [None] * n)[i] is None:
+                a["values"].setdefault(k, [None] * n)[i] = v
+                if k not in took and not any(x is not None for j2, x in enumerate(a["values"][k]) if j2 != i):
+                    a["labels"][k] = b["labels"].get(k, k)
+                took.add(k)
+    if "gross_profit" not in took:
+        _derive_gross_profit(a["values"], a["labels"], n)
+    return sorted(took)
 
 
 def _derive_bank(st: str, values: dict, labels: dict, n: int) -> None:
@@ -623,9 +702,9 @@ def _net_bank_income(values: dict, labels: dict, n: int, step: float) -> None:
             continue
         gross = ii[i] + (fee[i] or 0) + (oth[i] or 0)
         net = nii[i] if nii[i] is not None else (ii[i] - abs(ie[i]) if ie[i] is not None else None)
-        if net is None or abs(gross - net) <= checks.tolerance(gross, step):
+        if net is None or abs(gross - net) <= checks.tolerance([gross, net], step):
             continue
-        if abs(toi[i] - gross) <= checks.tolerance(gross, step):
+        if abs(toi[i] - gross) <= checks.tolerance([toi[i], gross], step):
             toi[i] = round(net + (fee[i] or 0) + (oth[i] or 0), 3)
             fixed = True
     if fixed:
@@ -712,9 +791,11 @@ def normalise(data: dict, formats: dict | None = None) -> dict:
         # Derived lines work by meaning (key), whatever the format calls them; each only fills a
         # line the filing didn't print, from parts the filing did print.
         _derive_bank(st, values, labels, n)
+        rows = T.rows_for(st, fmt, formats)
         if st == "income_statement":
-            _derive_gross_profit(values, labels, n)
-        _apply_formulas(st, T.rows_for(st, fmt, formats), values, labels, n)
+            _derive_bank_gross(values, labels, n)
+            _derive_gross_profit(values, labels, n, by_formula=any(r.key == "gross_profit" and r.formula for r in rows))
+        _apply_formulas(st, rows, values, labels, n)
         if st == "cash_flow" and "cf_net_operating" in values:
             capex = values.get("cf_capex", [None] * n)
             values["free_cash_flow"] = [

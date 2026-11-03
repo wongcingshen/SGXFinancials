@@ -16,7 +16,7 @@
      "key": "cost_of_sales",
      "label": "Cost of Goods Sold",
      "kind": "item",
-     "hint": "Cost of sales, cost of revenue; negative. Leave out when the statement has no such line"
+     "hint": "The gross expense: cost of sales / cost of revenue as printed; negative. Not printed: with expenses by nature, leave it out (the program adds raw materials, employee benefits and depreciation); otherwise judge which expense lines are the cost of earning the revenue and give their sum, source labels joined with ' + ' (a bank, finance or insurance company: e.g. financial cost associated with financial income + provision for credit losses + insurance service expenses + operating costs)"
     },
     {
      "key": "raw_materials",
@@ -34,7 +34,7 @@
      "key": "gross_profit",
      "label": "Gross Profit",
      "kind": "total",
-     "hint": "Gross profit as printed. Leave out when not printed"
+     "hint": "Gross profit as printed. Leave out when not printed: the program calculates revenue + cost of goods sold, so it is never blank"
     },
     {
      "key": "other_income",

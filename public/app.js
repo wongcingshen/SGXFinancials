@@ -177,38 +177,61 @@ function filesLine(a) {
 
 const BUSY = { queued: "Queued", reading: "Reading PDF…", asking: "Photos: your choice…", ai: () => `${state.ai} reading…` };
 
+// Whether a finished extraction can be relied on: the server's verdict (ok only when a tie-out check
+// passes, none fails, and every statement and gross profit is there). "0 checks pass" is a failure,
+// not a success: nothing confirms such figures (a presentation's highlights, lines read as 0).
+function verdictOf(res) {
+  if (res?.verdict) return res.verdict;
+  const checks = res?.checks || []; // a server from before verdicts: judge by the checks alone
+  const pass = checks.filter((c) => c.status === "PASS").length;
+  const fail = checks.filter((c) => c.status === "FAIL").length;
+  const reasons = [fail && `${fail} tie-out check${fail === 1 ? " fails" : "s fail"}`,
+    !pass && "no tie-out check passes, so nothing confirms the figures"].filter(Boolean);
+  return { ok: !reasons.length, pass, fail, reasons, summary: [fail && `${fail} check${fail === 1 ? " fails" : "s fail"}`, !pass && "0 checks pass"].filter(Boolean).join(" · ") };
+}
+const isSlides = (j) => Boolean((j.scan || j.result)?.scan?.presentation);
+
 function cardHtml(a, i) {
   const j = a.job;
   const busy = j.status in BUSY;
   const label = j.status === "ai" ? `${j.ai || state.ai} reading…` : BUSY[j.status];
-  const pass = j.result ? j.result.checks.filter((c) => c.status === "PASS").length : 0;
-  const fail = j.result ? j.result.checks.filter((c) => c.status === "FAIL").length : 0;
-  const pill = j.status === "done" ? `${icon("check", "width:14px;height:14px")}Excel ready`
+  const v = j.status === "done" ? verdictOf(j.result) : null;
+  const unverified = Boolean(v && !v.ok);
+  const pill = j.status === "done" ? (unverified ? `${icon("alert", "width:14px;height:14px")}Check failed` : `${icon("check", "width:14px;height:14px")}Excel ready`)
     : j.status === "failed" ? `${icon("alert", "width:14px;height:14px")}Failed`
-    : j.status === "skipped" ? `${icon("x", "width:14px;height:14px")}Not results`
+    : j.status === "skipped" ? `${icon("x", "width:14px;height:14px")}${isSlides(j) ? "Slides only" : "Not results"}`
     : j.status === "claude" ? `${icon("sparkles", "width:14px;height:14px")}Reading in Claude`
     : busy ? `<span class="spin" aria-hidden="true"></span>${esc(label)}${j.since ? ` <span class="elapsed" data-since="${j.since}">${clock(j.since)}</span>` : ""}`
     : `<span class="dot"></span>${esc(when(a.broadcast) || "SGX")}`;
+  const claudeBtn = (why, text, cls = "btn-ember") => !a.url ? "" : `<button type="button" class="btn ${cls}" data-claude="${i}" data-why="${why}" title="Opens a Claude chat that reads the filing itself through the SGX Financials connector">${icon("sparkles")}${text}</button>`;
   const action = j.status === "done"
-    ? `<a class="btn btn-ember" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Excel</a>`
+    ? unverified
+      ? a.url
+        ? `${claudeBtn("recheck", "Check with Claude")}<a class="btn btn-outline btn-icon" href="${j.blobUrl}" download="${esc(j.filename)}" title="Download the Excel anyway (figures not verified)" aria-label="Download the Excel anyway (figures not verified)">${icon("download")}</a>`
+        : `<a class="btn btn-ember" href="${j.blobUrl}" download="${esc(j.filename)}" title="The figures are not verified">${icon("download")}Excel</a>`
+      : `<a class="btn btn-ember" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Excel</a>`
     : busy
       ? `<button type="button" class="btn btn-ember" disabled><span class="spin" aria-hidden="true"></span>${esc(label)}</button>`
-      : j.status === "skipped" ? `<button type="button" class="btn btn-outline" data-details="${i}">${icon("eye")}Why skipped</button>`
+      : j.status === "skipped" ? (isSlides(j) && a.url
+        ? `${claudeBtn("skipped", "Ask Claude", "btn-outline")}<button type="button" class="btn btn-outline btn-icon" data-details="${i}" title="Why skipped" aria-label="Why skipped">${icon("eye")}</button>`
+        : `<button type="button" class="btn btn-outline" data-details="${i}">${icon("eye")}Why skipped</button>`)
       : j.status === "claude" ? `<button type="button" class="btn btn-ember" data-claude="${i}">${icon("sparkles")}Open in Claude</button>
         <button type="button" class="btn btn-outline" data-gemini="${i}" title="Read it here with ${esc(state.ai)} instead">Use ${esc(state.ai)}</button>`
       : `<button type="button" class="btn ${a.kind === "other" ? "btn-outline" : "btn-ember"}" data-extract="${i}">${icon("sparkles")}${j.status === "failed" ? "Try again" : "Extract"}</button>`;
   const saved = j.saved ? ` · ${j.merged ? "merged into" : "saved to"} folder` : j.saveError ? " · not saved to folder" : "";
   const status = j.status === "done"
-    ? `<span class="card-note ${fail ? "bad" : ""}">${pass} checks pass${fail ? `, ${fail} fail` : ""}${saved}</span>`
+    ? unverified
+      ? `<span class="card-note bad multiline" title="${esc(v.reasons.join("; "))}">${j.sentToClaude ? "Sent to Claude · Excel link in the chat" : `Not verified: ${esc(v.summary || v.reasons[0] || "")}`}${saved}</span>`
+      : `<span class="card-note">${v.pass} check${v.pass === 1 ? "" : "s"} pass, none fails${saved}</span>`
     : j.status === "failed" ? `<span class="card-note bad" title="${esc(j.error)}">${esc(j.error)}</span>`
-    : j.status === "skipped" ? `<span class="card-note muted" title="${esc(j.error)}">${esc(j.error)}</span>`
+    : j.status === "skipped" ? `<span class="card-note muted" title="${esc(j.error)}">${esc(isSlides(j) ? "Presentation only: no formal financial statements" : j.error)}</span>`
     : j.status === "claude" ? `<span class="card-note muted" title="The Excel link arrives in the Claude chat">Sent to Claude ${esc(CLAUDE_MODEL)} · Excel link in the chat</span>`
     : a.reason ? `<span class="card-note muted" title="${esc(a.reason)}">${esc(a.reason)}</span>` : "";
   const hasDetails = j.scan || j.result || j.error;
   const name = esc(nameCase(a.issuer) || a.fileName || "Unknown issuer");
   // Cards fade in once, when a screen's results first appear; later redraws don't replay it.
   const motion = state.animate ? `animation-delay:${Math.min(i, 12) * 30}ms` : "animation:none";
-  return `<article class="card ${j.status} ${a.kind === "other" ? "other" : ""}" data-card="${i}" data-accent="${accentFor(a.stock_code || a.issuer)}" style="${motion}">
+  return `<article class="card ${j.status} ${unverified ? "unverified" : ""} ${a.kind === "other" ? "other" : ""}" data-card="${i}" data-accent="${accentFor(a.stock_code || a.issuer)}" style="${motion}">
     <div class="band">
       <svg class="route" viewBox="0 0 260 104" preserveAspectRatio="none" aria-hidden="true"><path d="M20 84 C70 70 90 40 140 46 S210 20 250 14" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 7"/></svg>
       <span class="pill">${pill}</span>
@@ -558,7 +581,8 @@ async function extract(a, { pages } = {}) {
   } catch (e) {
     if (e.body?.not_results) {
       Object.assign(j, { status: "skipped", error: e.message, scan: e.body.scan ? { scan: e.body.scan, pages: [] } : null });
-      a.kind = "other";
+      // A notice moves to the other announcements; results that came only as slides stay in view.
+      if (!e.body.scan?.presentation) a.kind = "other";
       renderCards();
       return;
     }
@@ -581,10 +605,11 @@ async function extractAll() {
   };
   await Promise.all([worker(), worker()]);
   for (const a of queue) a.job.status = "idle"; // left over after Stop
-  const done = state.items.filter((a) => a.job.status === "done").length;
+  const done = state.items.filter((a) => a.job.status === "done");
+  const unverified = done.filter((a) => !verdictOf(a.job.result).ok).length;
   state.bulk = null;
   renderCards();
-  toast(`Extract all finished: ${done} workbook${done === 1 ? "" : "s"} ready.`);
+  toast(`Extract all finished: ${done.length} workbook${done.length === 1 ? "" : "s"} ready${unverified ? `, ${unverified} not verified (Check with Claude)` : ""}.`);
 }
 
 let zipLib;
@@ -621,14 +646,15 @@ const stepNames = () => ["Download", "Keyword scan", `${state.ai} reads`, "Workb
 function stepsHtml(j) {
   const active = { reading: 0, queued: 0, ai: 2, done: 4 }[j.status] ?? (j.result ? 4 : j.scan ? 2 : 0);
   const failed = j.status === "failed";
+  const stopped = j.status === "skipped"; // set aside after the scan: no AI step is under way
   return `<ol class="progress">${stepNames().map((s, i) => {
-    const st = i < active ? "done" : i === active ? (failed ? "failed" : "active") : "";
+    const st = i < active ? "done" : i === active && !stopped ? (failed ? "failed" : "active") : "";
     const inner = st === "done" ? icon("check", "width:16px;height:16px") : st === "failed" ? icon("x", "width:16px;height:16px") : i + 1;
     return `<li class="${st}"><span class="badge">${inner}</span>${s}</li>`;
   }).join("")}</ol>`;
 }
 
-function scanHtml(scan, pages) {
+function scanHtml(scan, pages, skipped = false) {
   const owner = {};
   for (const s of STATEMENTS) for (const p of scan.selected[s.key] || []) owner[p] = s.cls;
   const img = new Set(scan.image_only_pages);
@@ -640,7 +666,7 @@ function scanHtml(scan, pages) {
       <span class="nm">${s.name}<small>${sel.length ? `keyword score ${top ? Math.round(top.score) : "–"}` : "no page scored high enough"}</small></span>
       <span class="chips">${sel.length ? sel.map((p) => `<span class="chip">p${p}</span>`).join("")
         : scan.vision ? `<span class="chip">in the pictures</span>`
-        : scan.ai_locate ? `<span class="chip">${esc(state.ai)} finds it</span>` : `<span class="chip missing">not found</span>`}</span></div>`;
+        : scan.ai_locate && !skipped ? `<span class="chip">${esc(state.ai)} finds it</span>` : `<span class="chip missing">not found</span>`}</span></div>`;
   }).join("");
   const strip = scan.page_count <= 400
     ? `<div class="pm" aria-label="Page map">${Array.from({ length: scan.page_count }, (_, i) => {
@@ -657,7 +683,7 @@ function scanHtml(scan, pages) {
       <p class="muted" style="margin:10px 0 0;font-size:13px">${esc(scan.pdf)} · ${scan.page_count} pages${scan.attachments.length > 1 ? ` · the financial statements PDF of ${scan.attachments.length} attachments (${scan.downloaded.length} opened)` : ""}${
         pages?.length ? ` · ${pages.length} page${pages.length === 1 ? "" : "s"} go to ${esc(state.ai)}` : ""}</p>
     </div>
-    ${scan.ai_locate ? `<div class="notice info">${icon("sparkles")}<div>The keyword scan didn’t find the deciding words for ${
+    ${scan.ai_locate && !skipped ? `<div class="notice info">${icon("sparkles")}<div>The keyword scan didn’t find the deciding words for ${
         scan.missing.map((k) => STATEMENTS.find((x) => x.key === k).name.toLowerCase()).join(", ")}, so ${pages?.length || "the"} page${pages?.length === 1 ? "" : "s"} (${
         pages?.length === scan.page_count ? "the whole document" : "what was found plus the most number-heavy pages"}) go to ${esc(state.ai)}, which finds the three statements itself.</div></div>` : ""}
     ${scan.vision
@@ -666,12 +692,21 @@ function scanHtml(scan, pages) {
       : img.size ? `<div class="notice">${icon("alert")}<div>${img.size} page${img.size === 1 ? " is a picture" : "s are pictures"} with no readable text. If a statement is missing, enter its pages below.</div></div>` : ""}`;
 }
 
-function resultHtml(r) {
+function verdictHtml(r, canClaude) {
+  const v = verdictOf(r);
+  if (v.ok) return `<div class="notice ok">${icon("check")}<div><b>Verified.</b> ${v.pass} tie-out check${v.pass === 1 ? "" : "s"} pass and none fails; every statement and gross profit found.</div></div>`;
+  return `<div class="notice error" role="alert">${icon("alert")}<div><b>Not verified: don’t rely on these figures yet.</b>
+    <ul class="reasons">${v.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+    ${canClaude ? "<b>Re-check with Claude</b> (below) has Claude read the filing itself through the connector and check it again."
+      : "Check the figures against the PDF, or choose the statement pages below and extract again."}</div></div>`;
+}
+
+function resultHtml(r, canClaude) {
   const pass = r.checks.filter((c) => c.status === "PASS").length;
   const fail = r.checks.filter((c) => c.status === "FAIL");
   const na = r.checks.length - pass - fail.length;
   const ordered = [...fail, ...r.checks.filter((c) => c.status !== "FAIL")];
-  return `<div>
+  return `${verdictHtml(r, canClaude)}<div>
       <p class="block-title">Extracted</p>
       <div class="kv"><span><b>${esc(nameCase(r.meta.company_name))}</b></span><span>${esc(r.meta.currency)} · ${esc(r.meta.basis || "Group")}${r.meta.format === "bank" ? " · bank format" : ""} · '000</span>
         <span>pages ${esc(r.meta.pages)}</span><span>${r.usage?.input_tokens ? `${r.usage.input_tokens.toLocaleString()} in / ${(r.usage.output_tokens || 0).toLocaleString()} out tokens` : "from cache, no tokens used"}</span>
@@ -683,7 +718,7 @@ function resultHtml(r) {
         <span class="tag ${fail.length ? "fail" : "na"}">${icon(fail.length ? "alert" : "check", "width:14px;height:14px")}${fail.length} fail</span>
         ${na ? `<span class="tag na">${na} not checkable or derived</span>` : ""}</div>
       <details ${fail.length ? "open" : ""} style="margin-top:10px"><summary>${fail.length ? "Review the failed checks" : "Show every check"}</summary>
-        <div class="check-list">${ordered.map((c) => `<div><span>${esc(c.check)}<br><span class="per">${esc(c.period)}${c.difference != null && c.status === "FAIL" ? ` · off by ${Number(c.difference).toLocaleString()}` : ""}</span></span>
+        <div class="check-list">${ordered.map((c) => `<div><span>${esc(c.check)}<br><span class="per">${esc(c.period)}${c.note ? ` · ${esc(c.note)}` : c.difference != null && c.status === "FAIL" ? ` · off by ${Number(c.difference).toLocaleString()}` : ""}</span></span>
           <span class="tag ${c.status === "PASS" ? "pass" : c.status === "FAIL" ? "fail" : "na"}">${c.status === "n/a" ? "n/a" : c.status.toLowerCase()}</span></div>`).join("")}</div>
       </details>
     </div>
@@ -718,18 +753,23 @@ function showDetails(a) {
   const pages = (j.result || j.scan)?.pages?.join(",") || "";
   $("#runBody").innerHTML = `${stepsHtml(j)}<div class="stage">
     ${filesLine(a) ? `<div>${filesLine(a)}</div>` : ""}
-    ${scan ? scanHtml(scan.scan, scan.pages) : ""}
-    ${j.result ? resultHtml(j.result) : ""}
-    ${j.status === "failed" ? `<div class="notice error">${icon("alert")}<div>${esc(j.error)}</div></div>` : ""}
-    ${j.status === "skipped" ? `<div class="notice info">${icon("info")}<div>${esc(j.error)} No AI was used. If this is wrong, enter the statement pages below to extract anyway.</div></div>` : ""}
+    ${scan ? scanHtml(scan.scan, scan.pages, j.status === "skipped") : ""}
+    ${j.result ? resultHtml(j.result, Boolean(a.url)) : ""}
+    ${j.status === "failed" ? `<div class="notice error">${icon("alert")}<div>${esc(j.error)}${a.url ? `
+      <div class="notice-actions"><button type="button" class="btn btn-outline" data-why="failed">${icon("sparkles")}Read it with Claude</button></div>` : ""}</div></div>` : ""}
+    ${j.status === "skipped" ? `<div class="notice info">${icon("info")}<div>${esc(j.error)} No AI was used. If this is wrong, enter the statement pages below to extract anyway${
+      a.url ? ", or ask Claude to look at it." : "."}${a.url ? `
+      <div class="notice-actions"><button type="button" class="btn btn-outline" data-why="skipped">${icon("sparkles")}Ask Claude</button></div>` : ""}</div></div>` : ""}
     ${j.status in BUSY ? "" : `<details ${j.status === "failed" ? "open" : ""}><summary>Wrong pages? Choose them yourself</summary>
       <form class="rerun" id="rerunForm"><label class="sr-only" for="rerunPages">Pages</label>
         <input class="input" id="rerunPages" placeholder="e.g. 7,8,9,10" value="${esc(pages)}" inputmode="numeric">
         <button class="btn btn-ink" type="submit">${icon("refresh")}Extract</button></form></details>`}
   </div>`;
+  const unverified = j.status === "done" && !verdictOf(j.result).ok;
   $("#runFoot").hidden = j.status !== "done";
   $("#runFoot").innerHTML = j.status === "done"
-    ? `<a class="btn btn-ember btn-lg btn-block" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Download ${esc(j.filename)}</a>` : "";
+    ? `${unverified && a.url ? `<button type="button" class="btn btn-ember btn-lg btn-block" data-why="recheck">${icon("sparkles")}Re-check with Claude</button>` : ""}
+      <a class="btn ${unverified ? "btn-outline" : "btn-ember"} btn-lg btn-block" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Download ${esc(j.filename)}${unverified ? " (not verified)" : ""}</a>` : "";
   $("#rerunForm")?.addEventListener("submit", (e) => {
     e.preventDefault();
     const p = $("#rerunPages").value.replace(/\s/g, "");
@@ -916,23 +956,47 @@ const CLAUDE_MODEL = "Opus 5.5";
 const ASK_SECONDS = 30;
 let askChain = Promise.resolve();
 
-function claudePrompt(a) {
-  const used = a.job.scan?.scan?.used_url;
-  return [
-    "Use the SGX Financials connector to read this SGX results filing. Its financial statements are photos/scans, "
+// What Claude is asked, by why: "photos" (statements that are pictures), "recheck" (the server's AI read
+// it but the figures aren't verified), "skipped" (set aside without AI, e.g. slides only), "failed".
+function claudePrompt(a, why = "photos") {
+  const j = a.job, res = j.result;
+  const used = (j.scan || res)?.scan?.used_url;
+  const v = res ? verdictOf(res) : null;
+  const found = Object.values(res?.meta?.found_pages || {}).flat();
+  const pages = [...new Set(found.length ? found : res?.pages || [])].sort((x, y) => x - y);
+  const pagesArg = pages.length && pages.length <= 6 ? ` and pages=[${pages.join(", ")}]` : "";
+  // This filing's own failing checks (the workbook's may include periods merged in from earlier filings).
+  const fails = (v?.failing || (res?.checks || []).filter((c) => c.status === "FAIL")).slice(0, 4).map((c) => `- ${c.period}: ${c.check}${
+    c.note ? ` (${c.note})` : c.difference != null ? ` (off by ${Number(c.difference).toLocaleString()} '000)` : ""}`);
+  const ask = {
+    photos: "Use the SGX Financials connector to read this SGX results filing. Its financial statements are photos/scans, "
       + "so read the page images yourself (open_filing, then submit_statements), re-read any lines whose checks fail, "
       + "and give me the Excel download link.",
+    recheck: `Use the SGX Financials connector to re-check this SGX results filing. ${res?.meta?.model || state.ai} read it, `
+      + `but the figures are NOT verified: ${(v?.reasons || []).join("; ")}.${fails.length ? `\nFailing checks:\n${fails.join("\n")}` : ""}\n`
+      + `Read the statements yourself: open_filing with as_images=true${pagesArg}, then submit_statements. Re-read any lines `
+      + "whose checks fail, don't leave gross profit blank (judge the gross expense when none is printed), and give me the "
+      + "Excel download link. Don't use extract_filing: that is the reading that failed. If the filing has no formal "
+      + "financial statements (only a presentation), tell me instead.",
+    skipped: `Use the SGX Financials connector to check this SGX filing. The app set it aside without AI: ${j.error || "not a results filing."} `
+      + "Look at it yourself (open_filing with as_images=true). If it has the Group's income statement, balance sheet and "
+      + "cash flow statement, read them, submit_statements and give me the Excel download link; if not, tell me what it contains.",
+    failed: `Use the SGX Financials connector to read this SGX results filing; the app couldn't (${j.error || "it failed"}). `
+      + "Open it with open_filing (as_images=true to read the pages yourself), then submit_statements, and give me the Excel download link.",
+  }[why] || "";
+  return [
+    ask,
     `Company: ${nameCase(a.issuer) || "?"}${a.stock_code ? ` (${a.stock_code})` : ""}`,
     a.title ? `Filing: ${shortTitle(a.title)}` : "",
     `Announcement: ${a.url}`,
     used && used !== a.url ? `Results PDF: ${used}` : "",
   ].filter(Boolean).join("\n");
 }
-function openClaudeChat(a) {
-  const url = `https://claude.ai/new?q=${encodeURIComponent(claudePrompt(a))}`;
+function openClaudeChat(a, why = "photos") {
+  const url = `https://claude.ai/new?q=${encodeURIComponent(claudePrompt(a, why))}`;
   const win = window.open(url, "_blank");
   if (win) win.opener = null;
-  else toast("Your browser blocked the Claude tab: allow pop-ups for this site, then click Open in Claude");
+  else toast("Your browser blocked the Claude tab: allow pop-ups for this site, then click the Claude button again");
 }
 
 function askReader(a) {
@@ -1068,11 +1132,25 @@ $("#results").addEventListener("click", async (e) => {
   if (i == null) return;
   const a = state.items[+i];
   if (b.dataset.details != null) return showDetails(a);
-  if (b.dataset.claude != null) return openClaudeChat(a);
+  if (b.dataset.claude != null) return askClaude(a, b.dataset.why || "photos");
   if (state.bulk && b.dataset.gemini == null) return;
   a.readWith = b.dataset.gemini != null ? "gemini" : undefined; // Extract / Try again asks again for photos
   await folderReady();
   extract(a);
+});
+
+// A Claude chat that reads the filing itself; a re-check is noted on the card (the link arrives in the chat).
+function askClaude(a, why) {
+  openClaudeChat(a, why); // inside the click, so the new tab isn't blocked
+  if (why === "recheck") {
+    a.job.sentToClaude = true;
+    renderCard(a);
+  }
+}
+$("#runSheet").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-why]");
+  const a = b && state.items.find((x) => x.key === $("#runSheet").dataset.key);
+  if (a) askClaude(a, b.dataset.why);
 });
 
 // Deep link: /?url=<SGX page URL> (or ?from=YYYYMMDD&to=YYYYMMDD) pre-fills the dates and screens.

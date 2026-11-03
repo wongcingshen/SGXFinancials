@@ -206,7 +206,9 @@ def _builtin_hint(statement: str, key: str) -> str:
 
 _build_lookup()
 BUILTIN = _load_builtin()
-for _fmt in BUILTIN.values():  # built-in labels count as synonyms, built-in hints guide imported rows
+# Built-in labels count as synonyms, built-in hints guide imported rows; the General format's come
+# first where formats share a key (a bank's Revenue is its gross income).
+for _fmt in sorted(BUILTIN.values(), key=lambda f: f["id"] != "general"):
     for _st, (_, _rows) in _fmt["statements"].items():
         for _r in _rows:
             if _r.kind != "header":

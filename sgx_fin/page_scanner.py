@@ -104,6 +104,8 @@ class ScanResult:
     # Scans that carry a hidden OCR text layer: the keywords can be read, the figures are read from
     # the picture (OCR layers often get digits wrong).
     scanned_pages: list[int] = field(default_factory=list)
+    # Why the PDF looks like a presentation (slides), e.g. "made in PowerPoint"; "" when it doesn't.
+    presentation: str = ""
 
     @property
     def picture_pages(self) -> list[int]:
@@ -116,6 +118,17 @@ class ScanResult:
     @property
     def found_all(self) -> bool:
         return all(self.selected.get(k) for k in TITLES)
+
+    @property
+    def titled(self) -> list[str]:
+        """Statements whose chosen pages are headed by a statement title: the formal statements, not a
+        slide of highlights that happens to use their words."""
+        by_page = {p.page: p for p in self.pages}
+        return [st for st, ps in self.selected.items() if any(st in by_page[p].title_hits for p in ps if p in by_page)]
+
+    @property
+    def formal_statements(self) -> bool:
+        return len(self.titled) == len(TITLES)
 
     @property
     def needs_vision(self) -> bool:
@@ -201,8 +214,19 @@ def _layers(page) -> tuple[bool, bool]:
 
 def read_pages(pdf: Path) -> list[tuple[str, bool, bool]]:
     """(text layer, has a picture, is a scan with a hidden OCR layer) for every page."""
+    return [r[:3] for r in _read(pdf)[0]]
+
+
+def _read(pdf: Path) -> tuple[list[tuple[str, bool, bool, tuple[float, float]]], str]:
+    """Every page's (text, has a picture, is a scan, (width, height) as displayed), and the program
+    that made the PDF (its Creator and Producer)."""
     doc = pdfium.PdfDocument(str(pdf))
     try:
+        try:
+            meta = doc.get_metadata_dict()
+            maker = " ".join(str(meta.get(k) or "") for k in ("Creator", "Producer"))
+        except Exception:
+            maker = ""
         out = []
         for i in range(len(doc)):
             page = doc[i]
@@ -213,10 +237,41 @@ def read_pages(pdf: Path) -> list[tuple[str, bool, bool]]:
                 has_image, scan = _layers(page)
             except Exception:
                 has_image, scan = False, False
-            out.append((text, has_image, scan))
-        return out
+            w, h = page.get_size()
+            if page.get_rotation() in (90, 270):
+                w, h = h, w
+            out.append((text, has_image, scan, (w, h)))
+        return out, maker
     finally:
         doc.close()
+
+
+# Results presentations (slides) show figures but not the formal financial statements. They are
+# told apart by the program that made them and by their shape: wide pages, little text on each.
+SLIDE_APPS = re.compile(r"power\s*point|keynote|\bimpress\b|google slides|\bcanva\b|\bprezi\b", re.I)
+SLIDE_WORDS = re.compile(
+    r"\bagenda\b|\bthank you\b|\bq\s?&\s?a\b|questions? (?:and|&) answers?|forward[- ]looking statements?|\bdisclaimer\b"
+    r"|key (?:highlights|takeaways)|investor (?:presentation|day|briefing)|analysts?'? (?:briefing|presentation|meeting)"
+    r"|results? (?:briefing|presentation)", re.I)
+
+
+def slide_deck(maker: str, shapes: list[tuple[float, float]], texts: list[str]) -> str:
+    """Why a PDF looks like a presentation, '' when it doesn't: made in PowerPoint (Keynote, Impress...),
+    or most pages slide-shaped (16:9), or landscape pages with little text and slide words (agenda,
+    disclaimer, Q&A, thank you)."""
+    if m := SLIDE_APPS.search(maker or ""):
+        name = m.group(0)
+        return "made in " + ("PowerPoint" if name.lower().startswith("power") else name.strip().title())
+    n = len(shapes)
+    if n < 2:
+        return ""
+    if sum(w >= 1.7 * h for w, h in shapes) >= 0.75 * n:
+        return "16:9 slides"
+    words = sorted(len(WORD.findall(t)) for t in texts)
+    sparse = bool(words) and words[len(words) // 2] < 120
+    if sum(w >= 1.25 * h for w, h in shapes) >= 0.75 * n and sparse and any(SLIDE_WORDS.search(t) for t in texts):
+        return "landscape slides"
+    return ""
 
 
 # A page with a picture and fewer characters than this is treated as a scan / photo.
@@ -259,11 +314,11 @@ def score_page(text: str, page_no: int) -> PageScore:
 
 
 def scan_pdf(pdf: Path, min_score: float = 14.0, max_pages_per_statement: int = 3) -> ScanResult:
-    read = read_pages(pdf)
-    pages = [score_page(t, i + 1) for i, (t, _, _) in enumerate(read)]
-    image_only = [i + 1 for i, (t, img, _) in enumerate(read)
+    read, maker = _read(pdf)
+    pages = [score_page(t, i + 1) for i, (t, _, _, _) in enumerate(read)]
+    image_only = [i + 1 for i, (t, img, _, _) in enumerate(read)
                   if not t.strip() or (img and len(t.strip()) < PICTURE_PAGE_MAX_CHARS)]
-    scanned = [i + 1 for i, (t, _, scan) in enumerate(read) if scan and i + 1 not in image_only]
+    scanned = [i + 1 for i, (t, _, scan, _) in enumerate(read) if scan and i + 1 not in image_only]
 
     selected: dict[str, list[int]] = {}
     for st in TITLES:
@@ -294,7 +349,8 @@ def scan_pdf(pdf: Path, min_score: float = 14.0, max_pages_per_statement: int = 
                 break
         selected[st] = chosen
 
-    result = ScanResult(pdf, len(pages), pages, selected, image_only, scanned_pages=scanned)
+    result = ScanResult(pdf, len(pages), pages, selected, image_only, scanned_pages=scanned,
+                        presentation=slide_deck(maker, [r[3] for r in read], [r[0] for r in read]))
     result.basis = statement_basis([read[p - 1][0] for p in (result.all_selected or range(1, min(len(read), 6) + 1))])
     return result
 
@@ -327,6 +383,8 @@ def format_report(res: ScanResult, top_n: int = 5) -> str:
         out.append(f"  pages with no text layer (scanned images): {res.image_only_pages}")
     if res.scanned_pages:
         out.append(f"  scans with a hidden OCR text layer: {res.scanned_pages}")
+    if res.presentation:
+        out.append(f"  a presentation ({res.presentation}); formal statements: {res.titled or 'none'}")
     for st in TITLES:
         ranked = sorted(res.pages, key=lambda p: p.scores[st], reverse=True)[:top_n]
         cand = ", ".join(f"p{p.page}={p.scores[st]}" for p in ranked)

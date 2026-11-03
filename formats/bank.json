@@ -7,6 +7,24 @@
    "title": "Income Statement",
    "rows": [
     {
+     "key": "revenue",
+     "label": "Gross Income",
+     "kind": "total",
+     "hint": "Gross income: interest income + fee and commission income + other non-interest income, before interest expense (an Indian bank's 'Total Income'). Leave out when not printed as one line: the program adds it up"
+    },
+    {
+     "key": "cost_of_sales",
+     "label": "Gross Expense",
+     "kind": "item",
+     "hint": "Gross expense, negative: interest expense (financial cost associated with financial income) + operating expenses (incl. insurance service expenses) + provisions for credit losses / allowances. Leave out unless one printed line covers all of them (an Indian bank's 'Total Expenditure' leaves out provisions): the program adds them up"
+    },
+    {
+     "key": "gross_profit",
+     "label": "Gross Profit",
+     "kind": "total",
+     "hint": "Gross profit as printed. Leave out when not printed: the program calculates gross income + gross expense"
+    },
+    {
      "key": "interest_income",
      "label": "Interest Income",
      "kind": "item",
@@ -40,7 +58,7 @@
      "key": "total_operating_income",
      "label": "Total Operating Income",
      "kind": "total",
-     "hint": "Total operating income NET of interest expense, if printed. Leave out an Indian bank's 'Total Income' (interest earned + other income): the program computes the net figure"
+     "hint": "Total operating income NET of interest expense, if printed. Leave out an Indian bank's 'Total Income' (interest earned + other income): that is Gross Income, and the program computes the net figure"
     },
     {
      "key": "staff_costs",
@@ -52,7 +70,7 @@
      "key": "other_operating_expenses_bank",
      "label": "Other Operating Expenses",
      "kind": "item",
-     "hint": "Other operating expenses (premises, depreciation, other); negative"
+     "hint": "Other operating expenses (premises, depreciation, insurance service expenses, other); negative"
     },
     {
      "key": "total_operating_expenses",
