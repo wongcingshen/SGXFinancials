@@ -21,7 +21,6 @@ const state = {
   health: null,
   ai: "AI",
   effort: store.get("sgxf-effort", "high"),
-  mergeFile: null,
   items: [], // announcements on screen (+ filings processed directly), each with its job state
   bulk: null, // { stop: bool } while Extract all runs
   dir: null, // folder chosen for downloads (FileSystemDirectoryHandle)
@@ -142,7 +141,7 @@ function renderIntro() {
       <ol class="steps">
         <li><span class="badge">1</span><span><strong>Screen</strong> <span class="muted">— opens every title and lists its PDFs.</span></span></li>
         <li><span class="badge">2</span><span><strong>Extract</strong> <span class="muted">— a keyword scan finds the three statements; ${esc(state.ai)} reads only those pages.</span></span></li>
-        <li><span class="badge">3</span><span><strong>Excel</strong> <span class="muted">— a ShareInvestor-style workbook with tie-out checks.</span></span></li>
+        <li><span class="badge">3</span><span><strong>Excel</strong> <span class="muted">— a standard workbook with tie-out checks.</span></span></li>
       </ol>
     </div>`;
   renderBulk();
@@ -498,15 +497,13 @@ function formData(a, dryRun, pages, workbook, files) {
   if (a.url && !a.file) fd.append("announcement_url", a.url);
   for (const [k, v] of [["issuer", a.issuer], ["stock_code", a.stock_code], ["title", a.title]]) if (v) fd.append(k, v);
   for (const f of files || a.attachments || []) { fd.append("pdf_url", f.url); fd.append("pdf_name", f.name || ""); }
-  const formats = customFormats();
-  if (formats.length) fd.append("formats", JSON.stringify(formats.map(({ marked, ...f }) => f)));
   const cogs = cogsPrefs();
   if (cogs.industries.length || cogs.companies.length) fd.append("cogs_rules", JSON.stringify(cogs));
   if (a.file) fd.append("pdf", a.file);
   fd.append("dry_run", dryRun ? "true" : "false");
   fd.append("effort", state.effort);
   if (pages) fd.append("pages", pages);
-  if (!dryRun && (workbook || state.mergeFile)) fd.append("workbook", workbook || state.mergeFile);
+  if (!dryRun && workbook) fd.append("workbook", workbook);
   return fd;
 }
 
@@ -563,13 +560,12 @@ async function extract(a, { pages } = {}) {
     renderCard(a);
     // With a download folder, merge into this company's workbook if it is already there.
     const name = a.stock_code || a.issuer ? workbookName(a) : null;
-    const existing = state.folderOk && name && !state.mergeFile ? await readFromFolder(name) : null;
+    const existing = state.folderOk && name ? await readFromFolder(name) : null;
     // Only the PDF the scan chose: the server needn't download the other attachments again.
     const chosen = scanRes.scan.used_url && a.attachments?.filter((f) => f.url === scanRes.scan.used_url);
     // Pages go along only when chosen by hand: otherwise the server picks them (and, for pictures,
     // narrows them down to the statement pages itself).
     const res = await api("/api/process?op=process", { method: "POST", body: formData(a, false, pages || a.pages || "", existing, chosen?.length ? chosen : null) });
-    if (state.mergeFile) clearMerge();
     const blob = new Blob([Uint8Array.from(atob(res.workbook_b64), (c) => c.charCodeAt(0))],
       { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     if (j.blobUrl) URL.revokeObjectURL(j.blobUrl);
@@ -887,105 +883,6 @@ $("#effort").addEventListener("click", (e) => {
 });
 $("#pw").value = store.get("sgxf-pw");
 $("#pw").addEventListener("input", () => store.set("sgxf-pw", $("#pw").value));
-wireDrop("#wbDrop", "#wbFile", (f) => {
-  state.mergeFile = f || null;
-  setDrop("#wbDrop", "#wbName", f, "Choose an earlier .xlsx from this app");
-  $("#wbClear").hidden = !f;
-});
-function clearMerge() {
-  state.mergeFile = null;
-  $("#wbFile").value = "";
-  setDrop("#wbDrop", "#wbName", null, "Choose an earlier .xlsx from this app");
-  $("#wbClear").hidden = true;
-}
-$("#wbClear").addEventListener("click", clearMerge);
-
-// ------------------------------------------------------------------ statement formats
-// Built-in formats come from the server (formats/*.json). Formats imported from ShareInvestor or
-// edited here are kept in this browser and sent with every extraction; one with a built-in's id
-// replaces it.
-const FORMAT_USES = {
-  general: "All companies except banks: trading, manufacturing, property, services, holding companies.",
-  bank: "Banks: statements show interest earned/expended (interest income/expense), deposits and loans/advances.",
-  reit: "REITs and business trusts: gross revenue, property expenses, net property income, distributions.",
-  insurance: "Insurers: gross written premiums, claims, underwriting result, investment income.",
-};
-const FORMAT_NAMES = { general: "General", bank: "Bank", reit: "REIT", insurance: "Insurance" };
-state.builtinFormats = [];
-let editingFormat = null;
-
-function customFormats() {
-  try { return JSON.parse(store.get("sgxf-formats", "[]")) || []; } catch { return []; }
-}
-function saveCustomFormats(list) {
-  store.set("sgxf-formats", JSON.stringify(list));
-  renderFormats();
-}
-async function loadFormats() {
-  try { state.builtinFormats = (await (await fetch("/api/formats?op=formats")).json()).formats || []; } catch { /* offline */ }
-  renderFormats();
-}
-function renderFormats() {
-  const custom = customFormats();
-  const builtinIds = new Set(state.builtinFormats.map((f) => f.id));
-  const items = [
-    ...state.builtinFormats.map((b) => {
-      const mine = custom.find((c) => c.id === b.id);
-      return mine ? { ...mine, tag: "your version" } : { ...b, tag: "built-in" };
-    }),
-    ...custom.filter((c) => !builtinIds.has(c.id)).map((c) => ({ ...c, tag: "yours" })),
-  ];
-  $("#fmtList").innerHTML = items.map((f) => `<div class="fmt-item"><span class="t"><b>${esc(f.name)}</b>
-      <span class="tag ${f.tag === "built-in" ? "na" : "pass"}">${f.tag}</span><small>${esc(f.applies_to)}</small></span>
-      <button type="button" class="btn btn-outline" data-fmt="${esc(f.id)}" style="min-height:36px;padding:0 12px">Edit</button></div>`).join("")
-    || `<p class="muted" style="margin:0;font-size:13px">Formats load when the server is reachable.</p>`;
-}
-function fmtUseChanged() {
-  const use = $("#fmtUse").value;
-  $("#fmtDescRow").hidden = use !== "other";
-  if (use !== "other" && !$("#fmtName").value.trim()) $("#fmtName").value = FORMAT_NAMES[use];
-}
-function openFormat(id) {
-  const mine = customFormats().find((f) => f.id === id);
-  const f = mine || state.builtinFormats.find((x) => x.id === id);
-  editingFormat = f?.id || null;
-  const use = f ? (FORMAT_USES[f.id] ? f.id : "other") : "reit";
-  $("#fmtUse").value = use;
-  $("#fmtName").value = f?.name || FORMAT_NAMES[use] || "";
-  $("#fmtDesc").value = use === "other" ? f?.applies_to || "" : "";
-  $("#fmtDescRow").hidden = use !== "other";
-  $("#fmtText").value = f?.marked || "[Income Statement]\n\n[Balance Sheet]\n\n[Cash Flow]\n";
-  $("#fmtFileName").textContent = "Choose or drop an Excel / CSV export";
-  $("#fmtProblems").hidden = true;
-  $("#fmtDelete").hidden = !mine;
-  $("#fmtTitle").textContent = f ? `${f.name} format` : "New format";
-  openSheet("#formatSheet");
-}
-function formatFields() {
-  const use = $("#fmtUse").value;
-  const fd = new FormData();
-  fd.append("id", use === "other" ? $("#fmtName").value.trim() || "custom" : use);
-  fd.append("name", $("#fmtName").value.trim() || FORMAT_NAMES[use] || "Custom");
-  fd.append("applies_to", use === "other" ? $("#fmtDesc").value.trim() : FORMAT_USES[use]);
-  fd.append("base", use === "other" ? "general" : use);
-  return fd;
-}
-function showProblems(problems) {
-  $("#fmtProblems").hidden = !problems?.length;
-  $("#fmtProblems").innerHTML = problems?.length ? `${icon("alert")}<div>${problems.map(esc).join("<br>")}</div>` : "";
-}
-async function readFormat(source) {
-  const fd = formatFields();
-  if (source instanceof File) fd.append("file", source);
-  else fd.append("text", source);
-  const res = await api("/api/parse_format?op=parse_format", { method: "POST", body: fd, timeoutMs: 60_000 });
-  showProblems(res.problems);
-  return res;
-}
-async function guarded(fn) {
-  try { await fn(); } catch (e) { showProblems([e.message]); }
-}
-
 // ------------------------------------------------------------------ cost of goods sold rules
 // Built-in industries and their COGS rules come from the server (industries/cogs.json). A user's changes
 // (an industry's rule, new industries, company rules) are kept in this browser and sent with every
@@ -1127,8 +1024,6 @@ async function recalcCogs(a) {
   fd.append("normalised", JSON.stringify(r.normalised));
   fd.append("meta", JSON.stringify(r.meta));
   fd.append("in_cogs", JSON.stringify(pickedLines()));
-  const formats = customFormats();
-  if (formats.length) fd.append("formats", JSON.stringify(formats.map(({ marked, ...f }) => f)));
   const existing = state.folderOk && j.saved ? await readFromFolder(j.filename) : j.blob;
   if (existing) fd.append("workbook", existing, j.filename);
   try {
@@ -1306,38 +1201,6 @@ $("#mcpGo").addEventListener("click", () => {
   openInstall();
 });
 $("#folderBtn").addEventListener("click", chooseFolder);
-$("#fmtList").addEventListener("click", (e) => { const b = e.target.closest("[data-fmt]"); if (b) openFormat(b.dataset.fmt); });
-$("#fmtAdd").addEventListener("click", () => openFormat(null));
-$("#fmtUse").addEventListener("change", fmtUseChanged);
-wireDrop("#fmtDrop", "#fmtFile", (file) => file && guarded(async () => {
-  $("#fmtFileName").textContent = file.name;
-  $("#fmtText").value = (await readFormat(file)).marked;
-}));
-$("#fmtRead").addEventListener("click", () => guarded(async () => {
-  $("#fmtText").value = (await readFormat($("#fmtText").value)).marked;
-}));
-$("#fmtSave").addEventListener("click", () => guarded(async () => {
-  const res = await readFormat($("#fmtText").value);
-  const list = customFormats().filter((f) => f.id !== res.format.id && f.id !== editingFormat);
-  saveCustomFormats([...list, { ...res.format, marked: res.marked }]);
-  editingFormat = res.format.id;
-  $("#fmtText").value = res.marked;
-  $("#fmtDelete").hidden = false;
-  toast(res.problems.length ? "Saved — check the formula notes" : `“${res.format.name}” format saved`);
-  if (!res.problems.length) $("#formatSheet").close();
-}));
-$("#fmtExport").addEventListener("click", () => guarded(async () => {
-  const res = await readFormat($("#fmtText").value);
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([JSON.stringify(res.format, null, 1)], { type: "application/json" }));
-  link.download = `${res.format.id}.json`;
-  link.click();
-}));
-$("#fmtDelete").addEventListener("click", () => {
-  saveCustomFormats(customFormats().filter((f) => f.id !== editingFormat));
-  toast("Your changes were removed");
-  $("#formatSheet").close();
-});
 $("#bulk").addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (b?.id === "bulkRun") await folderReady();
@@ -1387,7 +1250,6 @@ if (iso(deep.get("from"))) {
 syncEffort();
 renderIntro();
 loadHealth();
-loadFormats();
 loadIndustries();
 if (canPickFolder) idb("readonly", (st) => st.get("dir")).then((d) => { state.dir = d || null; renderFolder(); });
 renderFolder();

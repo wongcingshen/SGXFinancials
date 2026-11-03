@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SGX Financials</title>
-<meta name="description" content="Screen SGX financial results announcements and turn the three statements into a ShareInvestor-style Excel workbook.">
+<meta name="description" content="Screen SGX financial results announcements and turn the three statements into a standard Excel workbook.">
 <meta name="theme-color" content="#FAF9F5">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 34'%3E%3Crect width='34' height='34' rx='10' fill='%23F2784B'/%3E%3Crect x='8' y='19' width='4' height='7' rx='1.2' fill='%23141413'/%3E%3Crect x='14' y='15' width='4' height='11' rx='1.2' fill='%23141413'/%3E%3Ccircle cx='24' cy='11' r='4.4' fill='%23FFD66B' stroke='%23141413' stroke-width='1.8'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -226,21 +226,6 @@
         </div>
         <p class="help">Balanced suits most filings. Thorough helps with banks, REITs and dense layouts, at higher cost.</p>
       </div>
-      <div class="form-row">
-        <span class="lbl">Merge the next extraction into a workbook</span>
-        <div class="drop" id="wbDrop">
-          <span class="sun-circle"><svg class="i"><use href="#i-sheet"/></svg></span>
-          <span><span class="fname" id="wbName">Choose an earlier .xlsx from this app</span><br><span class="muted" style="font-size:13px">New periods are added as columns; existing ones are kept.</span></span>
-          <input type="file" id="wbFile" accept=".xlsx" aria-label="Workbook to merge into">
-        </div>
-        <button type="button" class="link-btn" id="wbClear" hidden style="align-self:flex-start;color:var(--color-ember-deep)">Don’t merge</button>
-      </div>
-      <div class="form-row">
-        <span class="lbl">Statement formats (ShareInvestor layout)</span>
-        <div class="fmt-list" id="fmtList"></div>
-        <button type="button" class="btn btn-outline" id="fmtAdd" style="align-self:flex-start"><svg class="i"><use href="#i-plus"/></svg>Add a format</button>
-        <p class="help">Each filing is written in the format that fits the company. Import yours from a ShareInvestor export to match it exactly, and add your own entries or formulas. Saved in this browser.</p>
-      </div>
       <div class="form-row" id="cogsSection">
         <span class="lbl">Cost of goods sold (COGS)</span>
         <p class="help">When a filing prints no cost of sales, <span data-ai>AI</span> names the company’s industry and marks which expense lines are COGS by that industry’s rule (materials always go in); the program adds them up, and the workbook’s <b>COGS Basis</b> sheet shows every line, in or out, and why. Change a rule, add an industry, or give a company its own.</p>
@@ -290,59 +275,6 @@
   <div class="sheet-foot">
     <button type="button" class="btn btn-ember btn-lg btn-block" id="cogsSave">Save rule</button>
     <div style="display:flex;justify-content:center"><button type="button" class="link-btn" id="cogsDelete" hidden style="color:var(--trip-lacquer)">Remove</button></div>
-  </div>
-</dialog>
-
-<!-- Statement format editor -->
-<dialog class="sheet" id="formatSheet" aria-labelledby="fmtTitle">
-  <div class="sheet-head">
-    <div class="t"><h2 id="fmtTitle">Statement format</h2><div class="sub muted">The rows, order and formulas of the workbook for one type of company.</div></div>
-    <button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
-  </div>
-  <div class="sheet-body">
-    <div class="form">
-      <div class="two">
-        <div class="form-row"><label for="fmtName">Name</label><input class="input" id="fmtName" placeholder="General"></div>
-        <div class="form-row"><label for="fmtUse">Used for</label>
-          <select class="input" id="fmtUse">
-            <option value="general">Companies except banks (General)</option>
-            <option value="bank">Banks</option>
-            <option value="reit">REITs and business trusts</option>
-            <option value="insurance">Insurers</option>
-            <option value="other">Other (describe below)</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row" id="fmtDescRow" hidden><label for="fmtDesc">Which companies</label>
-        <input class="input" id="fmtDesc" placeholder="e.g. Shipping trusts reporting charter income"></div>
-      <div class="form-row">
-        <span class="lbl">Start from ShareInvestor</span>
-        <div class="drop" id="fmtDrop">
-          <span class="sun-circle"><svg class="i"><use href="#i-upload"/></svg></span>
-          <span><span class="fname" id="fmtFileName">Choose or drop an Excel / CSV export</span><br><span class="muted" style="font-size:13px">Or paste rows copied from ShareInvestor’s Financials page below and press Read.</span></span>
-          <input type="file" id="fmtFile" accept=".xlsx,.xlsm,.csv,.txt" aria-label="ShareInvestor export">
-        </div>
-      </div>
-      <div class="form-row">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
-          <label for="fmtText">Entries</label>
-          <button type="button" class="link-btn" id="fmtRead" style="color:var(--color-ember-deep)">Read pasted rows</button>
-        </div>
-        <textarea class="input mono" id="fmtText" rows="16" spellcheck="false"></textarea>
-        <p class="help">One entry per line, in order. <span class="mono">[Balance Sheet]</span> starts a statement,
-          <span class="mono"># </span>marks a heading and <span class="mono">= </span>a bold total.
-          Add <span class="mono">:= Revenue + Cost of Goods Sold</span> to calculate an entry from others (use + and −);
-          a figure the filing prints is kept.</p>
-      </div>
-      <div class="notice" id="fmtProblems" hidden></div>
-    </div>
-  </div>
-  <div class="sheet-foot">
-    <button type="button" class="btn btn-ember btn-lg btn-block" id="fmtSave">Save format</button>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
-      <button type="button" class="link-btn" id="fmtExport">Download as JSON</button>
-      <button type="button" class="link-btn" id="fmtDelete" hidden style="color:var(--trip-lacquer)">Remove my changes</button>
-    </div>
   </div>
 </dialog>
 

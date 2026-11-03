@@ -98,22 +98,7 @@ The workbook gets a **Transcription** sheet with the tables as read: corrected f
 
 **Statement formats.** The rows, their order, subtotals and formulas come from a *format*, chosen
 per filing by the AI from each format's "used for" description. Built-in formats live in
-`formats/*.json` (General, Bank). In the web app (**Settings → Statement formats**) you can:
-
-- import a format from an Excel / CSV export or rows pasted from a financial data site's
-  statements page: labels, order, headings and totals are read and shown as editable text;
-- add, rename, reorder or delete entries, and change a built-in (your version replaces it);
-- add **formula entries**, e.g. `= EBITDA := Profit Before Tax + Finance Costs + Depreciation & Amortisation`
-  or `Gross Profit := Revenue + Cost of Goods Sold`: an entry with `:=` is calculated from other
-  entries of the same statement (+ and −, plain numbers allowed) wherever the filing doesn't
-  print it; a printed figure is kept. Misspelt references are reported when you save;
-- add a format for another type of company (REITs, insurers, …).
-
-Editable text syntax: `[Income Statement]` / `[Balance Sheet]` / `[Cash Flow]` start a statement,
-one entry per line, `# ` marks a heading, `= ` a bold total, `:= …` a formula. Formats are kept in
-the browser and sent with each extraction; **Download as JSON** and add the file to `formats/`
-to make it the default for everyone. Imported entries are matched by meaning ("Cost of Sales",
-"Taxation", "PATMI"…) to the built-in ones, so derived lines and tie-out checks keep working.
+`formats/*.json` (General, Bank); edit or add a file there to change them for everyone.
 
 **Banks** get their own layout: Gross Income, Gross Expense, Gross Profit, then Interest Income,
 Interest Expense, Net Interest Income, Fee & Commission Income, Other Non-Interest Income, Operating
@@ -213,8 +198,7 @@ yellow, Fraunces + Outfit, rounded cards, one accent colour per company):
 - **Choose download folder** (Chrome / Edge): every workbook is saved straight into that folder,
   one file per company, and a new filing is merged into the company's file already there.
 - **Process a filing** (header): an SGX announcement/PDF link or a PDF upload.
-- **Settings**: app password, how hard the AI reads, and a workbook to merge the next
-  extraction into.
+- **Settings**: app password, how hard the AI reads, and COGS rules.
 
 Preview it locally without SGX access or an API key:
 
@@ -295,8 +279,8 @@ Vercel notes: two functions are deployed. `api/browse.mjs` (Node) runs Chromium 
 `@sparticuz/chromium` for screening and attachments (`maxDuration: 120` s; a screen takes 10–40 s).
 `api/index.py` (Python) downloads, scans and extracts (`maxDuration: 300` s; extraction usually
 takes 1–3 min). Request bodies are capped at 4.5 MB by Vercel, so large PDFs should be given by SGX link
-rather than uploaded. Vercel has no storage, so each run returns a workbook to download; upload
-your previous workbook in **Options** to merge new periods into it.
+rather than uploaded. Vercel has no storage, so each run returns a workbook to download; choose a
+download folder to merge new periods into a company's workbook already there.
 
 ## Automatic daily retrieval (GitHub Actions)
 
