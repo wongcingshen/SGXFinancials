@@ -284,7 +284,7 @@ def test_ai_finds_the_statements_when_keywords_are_missing():
 
 
 def test_bank_in_crores_with_explicit_columns():
-    from sgx_fin import glm
+    from sgx_fin import checks as checks_mod, glm
 
     cols = [(1, "Quarter ended 30.09.2026", "30.09.2026", 3), (2, "Quarter ended 30.06.2026", "30.06.2026", 3),
             (3, "Quarter ended 30.09.2025", "30.09.2025", 3), (4, "Half year ended 30.09.2026", "30.09.2026", 6),
@@ -322,10 +322,13 @@ def test_bank_in_crores_with_explicit_columns():
     data, checks = workbook_bytes(None, norm, {"company_name": "BANK OF BARODA", "currency": "INR", "format": "bank"})
     wb = load_workbook(io.BytesIO(data))
     col_a = [c.value for c in wb["Income Statement"]["A"] if c.value]
-    assert "Interest Income" in col_a and "Cost of Goods Sold" not in col_a
+    assert "Interest Income" in col_a and "Gross Profit" in col_a and "Cost of Goods Sold" not in col_a
     names = {c["check"] for c in checks}
-    assert not any(n.startswith("Revenue") for n in names), "general checks skipped for a bank"
     assert any(n.startswith("Interest Income") for n in names)
+    # Gross income is added up from the bank's lines; with no operating expenses read there is no gross
+    # expense, so gross profit stays blank and the verdict says so.
+    assert inc["values"]["revenue"][0] == 350_000_000 and inc["labels"]["revenue"].startswith("computed")
+    assert "gross profit is blank" in checks_mod.verdict(norm)["reasons"]
 
     # A unit that isn't stated is taken as thousands.
     assert glm.coerce({"unit": ""})["unit"] == "thousands"
@@ -881,6 +884,232 @@ def test_release_date_notices_and_separate_statements():
     assert r3.json["release_date"] == "2026-11-12"
 
 
+def highlights():
+    """What a presentation's highlights slide gives: revenue and profit, nothing a printed total confirms."""
+    d = json.loads(json.dumps(FAKE))
+    d["income_statement"]["rows"] = [r for r in d["income_statement"]["rows"] if r["key"] in ("revenue", "pat_shareholders")]
+    d["balance_sheet"] = d["cash_flow"] = {"page_numbers": [], "periods": [], "rows": []}
+    return d
+
+
+def test_checks_that_prove_nothing_fail():
+    from sgx_fin import checks
+
+    good = extractor.normalise(FAKE)
+    v = checks.verdict(good)
+    assert v["ok"] and v["pass"] == 18 and v["fail"] == 0 and v["reasons"] == []
+
+    # 0 + 0 = 0 is not a pass: the lines may not be there at all.
+    zeros = json.loads(json.dumps(FAKE))
+    for st in ("income_statement", "balance_sheet", "cash_flow"):
+        for r in zeros[st]["rows"]:
+            r["values"] = [0, 0]
+    nz = extractor.normalise(zeros)
+    fails = checks.failures(nz)
+    assert fails and all(f["note"] == checks.ZERO for f in fails)
+    assert "every figure is 0" in checks.describe(fails[:1], nz) and "left out, not written as 0" in checks.describe(fails[:1], nz)
+    v = checks.verdict(nz)
+    assert not v["ok"] and v["pass"] == 0 and "0 checks pass" in v["summary"]
+    # A second reading that leaves those lines out (not printed) is taken: n/a beats a false 0.
+    second = json.loads(json.dumps(zeros))
+    second["cash_flow"]["rows"] = [r for r in second["cash_flow"]["rows"] if r["key"] not in ("cf_cash_begin", "cf_cash_end", "cf_fx_effect", "cf_net_change")]
+    fixed = checks.reconcile(nz, extractor.normalise(second))
+    assert any("left out (not printed)" in f for f in fixed), fixed
+    assert not any(f["check"].startswith("Begin + Net Change") for f in checks.failures(nz))
+
+    # The slack is the rounding of the figures, not 0.2% of the total: a 300 misread in 199,000 fails.
+    misread = json.loads(json.dumps(FAKE))
+    misread["balance_sheet"]["rows"][2]["values"][0] += 300  # total assets
+    assert {f["check"] for f in checks.failures(extractor.normalise(misread))} == {
+        "NCA + CA = Total Assets", "Total Liabilities + Total Equity = Total Assets"}
+    assert checks.tolerance([100, 50, 150], 1) == 2  # thousands: two of the filing's units
+    assert checks.tolerance([123_456_700, 2_000, 123_458_700], 10_000) == 2_000  # crores printed to 0.1 crore
+    assert checks.tolerance([1_234.567, 1.0, 1_235.567], 0.001) == 0.002  # units: two dollars, not two thousand
+    assert checks.tolerance([10, 20, 30, 40, 50, 60, 70, 80, 90, 100], 1) == 5  # ten rounded figures
+
+    # Highlights only: nothing passes, statements and gross profit missing -> not verified, and why.
+    v = checks.verdict(extractor.normalise(highlights()), "16:9 slides")
+    assert not v["ok"] and v["pass"] == v["fail"] == 0
+    assert v["reasons"] == ["no tie-out check passes, so nothing confirms the figures",
+                            "no balance sheet or cash flow statement found", "gross profit is blank",
+                            "the PDF is a presentation (16:9 slides), not the formal financial statements"]
+    assert v["summary"] == "0 checks pass · no balance sheet or cash flow · gross profit blank · slides only"
+
+    # The workbook says so where the figures are, and on the Checks sheet with the verdict first.
+    meta = {"company_name": "ACME", "filing": "1H2026 Results", "verdict": v}
+    data, results = workbook_bytes(None, extractor.normalise(highlights()), meta)
+    wb = load_workbook(io.BytesIO(data))
+    assert wb["Income Statement"]["A3"].value.startswith("Not verified: 1H2026 Results: no tie-out check passes")
+    assert wb["Checks"]["A1"].value.startswith("NOT VERIFIED — 1H2026 Results (6M Jun 2026, 6M Jun 2025)")
+    data, _ = workbook_bytes(None, nz, {"company_name": "ACME", "filing": "zeros", "verdict": checks.verdict(nz)})
+    sheet = load_workbook(io.BytesIO(data))["Checks"]
+    head = next(r for r in range(1, 6) if sheet.cell(r, 1).value == "Statement")
+    assert sheet.cell(head, 6).value == "Note" and sheet.cell(head + 1, 4).value == "FAIL"
+    assert sheet.cell(head + 1, 6).value == "every figure is 0"
+    data, _ = workbook_bytes(None, good, {"company_name": "ACME", "filing": "FY", "verdict": checks.verdict(good)})
+    wb = load_workbook(io.BytesIO(data))
+    assert wb["Income Statement"]["A3"].value is None and wb["Checks"]["A1"].value.startswith("OK — FY")
+
+    # The web API sends this filing's verdict with the workbook, so the card can say "Check failed".
+    import importlib.util
+    import os
+    spec = importlib.util.spec_from_file_location("vapp_verdict", HERE.parent / "api" / "index.py")
+    app = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(app)
+    saved, real = os.environ.get("GEMINI_API_KEY"), extractor.extract
+    os.environ["GEMINI_API_KEY"] = "test"
+    try:
+        for reading, ok in ((FAKE, True), (highlights(), False)):
+            extractor.extract = lambda *a, _r=reading, **k: extractor.Extraction(_r, "fake", {})
+            r = app.app.test_client().post("/api/process?op=process", content_type="multipart/form-data",
+                                           data={"pdf": (io.BytesIO((HERE / "sample_results.pdf").read_bytes()), "acme.pdf")})
+            assert r.status_code == 200 and r.json["verdict"]["ok"] is ok, r.json.get("verdict")
+        assert r.json["verdict"]["summary"].startswith("0 checks pass")
+    finally:
+        extractor.extract = real
+        os.environ.pop("GEMINI_API_KEY", None)
+        if saved is not None:
+            os.environ["GEMINI_API_KEY"] = saved
+
+
+def test_gross_profit_is_never_blank():
+    from sgx_fin import checks, pipeline
+
+    # The rules ask for judgement when no cost of sales is printed, with the lines a financial company uses.
+    assert "Gross profit must never end up blank" in extractor.SYSTEM
+    assert "financial cost associated with financial income + provision for credit losses + insurance service " \
+           "expenses + operating costs" in extractor.SYSTEM
+
+    # A finance company read with the general format: the gross expense judged (sign forgotten), gross profit worked out.
+    fin = json.loads(json.dumps(FAKE))
+    fin["income_statement"]["rows"] = [
+        {"key": "revenue", "source_label": "Total income", "values": [50_000, 46_000]},
+        {"key": "cost_of_sales", "source_label": "Financial cost associated with financial income + Provision for credit "
+                                                  "losses + Insurance service expenses + Operating cost", "values": [38_000, 35_500]},
+        {"key": "profit_before_tax", "source_label": "Profit before tax", "values": [12_000, 10_500]},
+        {"key": "tax", "source_label": "Tax", "values": [-2_000, -1_800]},
+        {"key": "profit_after_tax", "source_label": "Profit for the year", "values": [10_000, 8_700]}]
+    inc = extractor.normalise(fin)["income_statement"]
+    assert inc["values"]["cost_of_sales"] == [-38_000, -35_500] and "sign corrected" in inc["labels"]["cost_of_sales"]
+    assert inc["values"]["gross_profit"] == [12_000, 10_500] and inc["labels"]["gross_profit"].startswith("computed")
+
+    # A bank: gross income, gross expense (interest + operating expenses + allowances) and gross profit from its lines.
+    bob = extractor.normalise(bob_reading(16082312))
+    v, labels = bob["income_statement"]["values"], bob["income_statement"]["labels"]
+    assert v["revenue"] == [457_837_100, 440_000_000]  # 'Total Income (1+2)' 4,578,371 lakhs
+    assert v["cost_of_sales"][0] == -(226_604_800 + 104_490_600 + 34_068_900) and "allowances" in labels["cost_of_sales"]
+    assert v["gross_profit"][0] == v["profit_before_tax"][0] == 92_672_800  # no exceptional item that quarter
+    assert checks.verdict(bob)["ok"]
+    data, _ = workbook_bytes(None, bob, {"company_name": "BANK OF BARODA", "format": "bank"})
+    col_a = [c.value for c in load_workbook(io.BytesIO(data))["Income Statement"]["A"] if c.value]
+    assert col_a.index("Gross Income") < col_a.index("Gross Expense") < col_a.index("Gross Profit") < col_a.index("Interest Income")
+    sources = load_workbook(io.BytesIO(data))["Source Map"]
+    assert any(r[2] == "Gross Expense" for r in sources.iter_rows(values_only=True)), "the bank's own row names"
+
+    # Left blank by a first reading: a second look asks for the gross expense, and its judgement is taken.
+    blank = json.loads(json.dumps(FAKE))
+    blank["income_statement"]["rows"] = [r for r in blank["income_statement"]["rows"] if r["key"] not in ("cost_of_sales", "gross_profit")]
+    judged = json.loads(json.dumps(FAKE))
+    judged["income_statement"]["rows"] = [r for r in judged["income_statement"]["rows"] if r["key"] != "gross_profit"]
+    judged["income_statement"]["rows"][1]["source_label"] = "Cost of services + Depreciation"
+    asked = []
+
+    def fake_extract(pdf, pages, gaps="", recheck="", **kw):
+        asked.append(gaps)
+        return extractor.Extraction(judged if gaps else blank, "fake", {"input_tokens": 1, "output_tokens": 1})
+
+    real = pipeline.extractor.extract
+    pipeline.extractor.extract = fake_extract
+    try:
+        out = HERE / "out" / "gross"
+        out.mkdir(parents=True, exist_ok=True)
+        res = pipeline.process_pdf(HERE / "sample_results.pdf", cache_dir=out)
+    finally:
+        pipeline.extractor.extract = real
+    assert len(asked) == 2 and asked[0] == "" and "gross profit is blank" in asked[1] and "judgement" in asked[1]
+    inc = res.normalised["income_statement"]
+    assert inc["values"]["cost_of_sales"] == [-80_412, -72_100] and inc["labels"]["cost_of_sales"] == "Cost of services + Depreciation"
+    assert inc["values"]["gross_profit"] == [40_100, 35_500] and inc["labels"]["gross_profit"].startswith("computed")
+    assert res.meta["rechecked"]["gross_profit_filled"] == ["cost_of_sales"] and res.meta["rechecked"]["gross_profit_still_blank"] == 0
+    assert res.meta["verdict"]["ok"], res.meta["verdict"]
+
+
+def test_presentations_are_not_results():
+    import importlib.util
+    import shutil
+    from pypdf import PdfReader, PdfWriter
+    from sgx_fin import mcp_server
+    from sgx_fin.page_scanner import slide_deck
+    from sgx_fin.pipeline import choose_financial_pdf, not_results_reason
+
+    # A results announcement that carries only slides: highlights, no formal statements. Set aside without AI.
+    deck = HERE / "deck_results.pdf"
+    scan = scan_pdf(deck)
+    assert scan.presentation == "16:9 slides" and scan.titled == ["income_statement", "balance_sheet"]
+    assert not_results_reason(deck, scan) == ("It's a presentation (16:9 slides) without the formal financial "
+                                              "statements (no cash flow statement).")
+    assert not scan_pdf(HERE / "sample_results.pdf").presentation  # a results PDF is not a deck
+
+    # Told apart by shape and words too (4:3 decks), but a landscape results PDF dense with figures is not slides.
+    sparse = ["Agenda\nKey highlights\nOutlook", "Revenue up 12%", "Thank you"]
+    assert slide_deck("", [(720, 540)] * 3, sparse) == "landscape slides"
+    assert slide_deck("", [(842, 595)] * 3, ["Statement of financial position " + "Total assets 1,234 " * 80] * 3) == ""
+    assert slide_deck("Microsoft® Word for Microsoft 365", [(595, 842)] * 3, sparse) == ""
+
+    # Made in PowerPoint: a deck even on A4 pages. One that holds the formal statements isn't set aside, but a
+    # results PDF among the attachments is preferred to it.
+    out = HERE / "out" / "deck"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    w = PdfWriter(clone_from=PdfReader(str(HERE / "sample_results.pdf")))
+    w.add_metadata({"/Creator": "Microsoft® PowerPoint® for Microsoft 365", "/Producer": "Microsoft® PowerPoint® for Microsoft 365"})
+    w.write(out / "pptx.pdf")
+    ppt = scan_pdf(out / "pptx.pdf")
+    assert ppt.presentation == "made in PowerPoint" and ppt.formal_statements and not_results_reason(out / "pptx.pdf", ppt) is None
+
+    class FakeClient:
+        def __init__(self): self.got = []
+        def download(self, url, folder):
+            kind = url.rsplit("=", 1)[1]
+            self.got.append(kind)
+            dest = folder / {"deck": "1H FY2026 Results.pdf", "results": "Financial Statements 1H2026.pdf"}[kind]
+            shutil.copy(out / "pptx.pdf" if kind == "deck" else HERE / "sample_results.pdf", dest)
+            return dest
+
+    links = [("https://links.sgx.com/FileOpen/a.ashx?k=deck", "1H FY2026 Results.pdf"),
+             ("https://links.sgx.com/FileOpen/b.ashx?k=results", "Financial Statements 1H2026.pdf")]
+    client = FakeClient()
+    pdf, found, used, _ = choose_financial_pdf(client, links, out)
+    assert used.endswith("k=results") and not found.presentation and client.got == ["deck", "results"]
+
+    # The web API stops before any AI call and says it's slides.
+    spec = importlib.util.spec_from_file_location("vapp_deck", HERE.parent / "api" / "index.py")
+    app = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(app)
+    called = []
+    real = extractor.extract
+    extractor.extract = lambda *a, **k: called.append(1)
+    try:
+        r = app.app.test_client().post("/api/process?op=process", content_type="multipart/form-data",
+                                       data={"pdf": (io.BytesIO(deck.read_bytes()), "1H FY2026 Results.pdf")})
+    finally:
+        extractor.extract = real
+    assert r.status_code == 422 and r.json["not_results"] and r.json["scan"]["presentation"] == "16:9 slides" and not called
+
+    # Claude, through the connector, is told the same, and can still look at the slides itself.
+    old = mcp_server.load_filing
+    mcp_server.load_filing = lambda args, ctx: (deck, scan_pdf(deck), None, [deck.name])
+    try:
+        ctx = mcp_server.Context("https://app.test", out)
+        res = mcp_server.call_tool("open_filing", {"announcement_url": "https://links.sgx.com/1.0.0/x"}, ctx)
+        text = res["content"][0]["text"]
+        assert "Not a results filing: It's a presentation (16:9 slides)" in text and "as_images=true" in text
+        res = mcp_server.call_tool("open_filing", {"announcement_url": "https://links.sgx.com/1.0.0/x", "as_images": True}, ctx)
+        assert sum(c["type"] == "image" for c in res["content"]) == 7 and "no formal financial statements" in res["content"][0]["text"]
+    finally:
+        mcp_server.load_filing = old
+
+
 def test_workbook_and_merge():
     meta = {"company_name": "ACME HOLDINGS LIMITED", "stock_code": "ACME", "currency": "SGD", "filing": "1H2026"}
     norm = extractor.normalise(FAKE)
@@ -986,7 +1215,27 @@ def test_mcp_connector():
             if row["key"] == "total_assets":
                 row["cells"][0]["value"] += 900
         text = call("submit_statements", {"extraction": wrong})["content"][0]["text"]
-        assert "FAIL" in text and "total_assets" in text
+        assert "FAIL" in text and "total_assets" in text and "Verdict: NOT VERIFIED: 2 tie-out checks fail" in text
+
+        # A good reading is confirmed; highlights are not, and Claude is told what to do about it.
+        text = call("submit_statements", {"extraction": data, "filing": "1H2026"})["content"][0]["text"]
+        assert "Verdict: OK" in text
+        link = text.split("Excel workbook")[1].split(": ", 1)[1].split()[0]
+        u = urlparse(link)
+        checks_sheet = load_workbook(io.BytesIO(client.get(f"{u.path}?{u.query}").data))["Checks"]
+        assert checks_sheet["A1"].value.startswith("OK — 1H2026")  # the verdict travels in the link
+        thin = copy.deepcopy(data)
+        thin["income_statement"]["rows"] = [r for r in thin["income_statement"]["rows"] if r["key"] in ("revenue", "pat_shareholders")]
+        thin["balance_sheet"] = thin["cash_flow"] = {"page_numbers": [], "periods": [], "rows": []}
+        text = call("submit_statements", {"extraction": thin})["content"][0]["text"]
+        assert "Verdict: NOT VERIFIED: no tie-out check passes" in text and "Gross profit is blank" in text
+        assert "No tie-out check passes" in text and "No balance sheet or cash flow statement was read" in text
+
+        # A text filing read as images comes with its text layer, digits exact.
+        current["pdf"] = HERE / "sample_results.pdf"
+        res = call("open_filing", {"announcement_url": url, "as_images": True})
+        layers = [c["text"] for c in res["content"] if c["type"] == "text" and "text layer" in c["text"]]
+        assert len(layers) == 4 and "120,512" in layers[0]
     finally:
         mcp_server.load_filing = old_load
         if old_pw is None:

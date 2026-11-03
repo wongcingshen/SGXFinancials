@@ -35,6 +35,7 @@ import requests
 
 from . import checks, extractor, pictures
 from . import template as T
+from .page_scanner import page_texts
 from .pipeline import attachment_name, choose_financial_pdf, default_pages, not_results_reason, process_pdf
 from .sgx_client import Announcement, SGXClient, Screen, build_page_url, classify_title, is_sgx_url
 
@@ -43,6 +44,7 @@ SERVER_INFO = {"name": "sgx-financials", "title": "SGX Financials", "version": "
 PREVIEW_LIMIT = 16  # small previews offered when Claude still has to find the statement pages
 READ_LIMIT = 6  # full-resolution statement pages per open_filing call
 PAGE_LONG_SIDE = 1800  # each page is sent as two overlapping halves at this size
+TEXT_LIMIT = 8000  # characters of a text page's text layer sent with its images
 
 INSTRUCTIONS = """SGX Financials turns SGX-listed companies' financial results into a standard Excel workbook \
 (income statement, balance sheet, cash flow, all in '000).
@@ -57,8 +59,15 @@ again with those pages. Then read every figure digit by digit, keeping each unde
 call submit_statements with the JSON described in the rules.
    - If the statements are text, call extract_filing (the server's AI reads them), or open_filing with \
 as_images=true to read them yourself the same way.
-3. submit_statements checks that parts add up to printed totals. If checks fail, re-read the lines it \
-names on the page images and submit the whole JSON again. Give the user the download link it returns."""
+3. submit_statements checks that parts add up to printed totals and gives a verdict. If it is NOT VERIFIED \
+(checks fail, none passes, a statement or gross profit is missing), do what it says: re-read the lines it names, \
+find the missing statement, or judge the gross expense, and submit the whole JSON again. Give the user the \
+download link it returns, and say plainly if the figures are still not verified.
+
+Re-checks: when the user asks you to re-check a filing whose checks failed with the server's AI, read it yourself \
+(open_filing with as_images=true, then submit_statements); don't call extract_filing, which repeats that reading. \
+Some results announcements carry only a presentation (slides) and no formal financial statements: say so rather \
+than submitting highlights as statements."""
 
 # ------------------------------------------------------------------ tool definitions
 _URLS = {
@@ -317,8 +326,13 @@ def open_tool(args: dict, ctx: Context) -> dict:
 
     if not chosen:
         reason = not_results_reason(pdf, scan)
+        if reason and not args.get("as_images"):
+            return _text("\n".join([*lines, "", f"Not a results filing: {reason}",
+                                    "To look at its pages yourself anyway, call open_filing again with as_images=true."]))
         if reason:
-            return _text("\n".join([*lines, "", f"Not a results filing: {reason}"]))
+            lines += ["", f"Set aside without AI as not a results filing: {reason} Look for the Group's formal "
+                          "income statement, balance sheet and cash flow statement; if there are none, tell the user "
+                          "this filing has no formal financial statements instead of submitting highlights."]
     pictures_route = bool(args.get("as_images")) or scan.needs_vision or any(p in scan.picture_pages for p in chosen)
     if not pictures_route:
         lines += ["", "The statements are TEXT. Call extract_filing with the same link to have the server's AI read "
@@ -348,12 +362,16 @@ def open_tool(args: dict, ctx: Context) -> dict:
         raise ToolError(f"Choose at most {READ_LIMIT} pages per call (got {len(chosen)}); the statements and their "
                         "continuation pages are usually 3-6 pages.")
     extra = []
+    texts = page_texts(pdf) if any(p not in scan.picture_pages for p in chosen) else []
     for p in chosen:
         img = pictures.prepare(pdf, p)  # upright, straightened, cropped, contrast-stretched
         img.thumbnail((PAGE_LONG_SIDE, PAGE_LONG_SIDE))
         top, bottom = pictures.halves(img)
         extra += [{"type": "text", "text": f"Page {p}, top half:"}, _image(pictures.jpeg(top, 82)),
                   {"type": "text", "text": f"Page {p}, bottom half (overlaps the top half):"}, _image(pictures.jpeg(bottom, 82))]
+        if texts and p not in scan.picture_pages and texts[p - 1].strip():  # a text page: its digits exactly
+            extra.append({"type": "text", "text": f"Page {p} text layer (exact digits; the images show which column "
+                                                  f"each belongs to):\n{texts[p - 1].strip()[:TEXT_LIMIT]}"})
     lines += ["", f"Pages {chosen} follow, each as two overlapping halves (cleaned up: turned upright, straightened, "
                   "contrast stretched). Read them yourself following the rules below, then call submit_statements with "
                   f"extraction=<the JSON>, plus announcement_url, source_pdf={json.dumps(pdf.name)}, pages={chosen}"
@@ -413,13 +431,13 @@ def _validate(data: dict, formats: dict) -> list[str]:
 
 
 def _figures_table(normalised: dict, formats: dict) -> str:
-    names = T.labels(formats)
     out = []
     for st in T.STATEMENT_IDS:
         block = normalised.get(st) or {}
         periods, values = block.get("periods") or [], block.get("values") or {}
         if not periods or not values:
             continue
+        names = {**T.labels(formats), **{r.key: r.label for r in T.rows_for(st, block.get("format"), formats)}}
         heads = [f"{p['period_end']}" + (f" ({p['months']}M)" if p.get("months") else "") for p in periods]
         out.append(f"\n{T.STATEMENT_TITLES[st]} ('000; EPS in cents)\n| Line | " + " | ".join(heads) + " |\n|---|"
                    + "---:|" * len(heads))
@@ -439,7 +457,7 @@ def download_link(ctx: Context, normalised: dict, meta: dict) -> str:
     """A link that rebuilds the workbook when opened: the figures travel in the link itself."""
     small = {st: {k: b[k] for k in ("periods", "values", "labels", "format", "step") if k in b} for st, b in normalised.items()}
     keep = ("company_name", "stock_code", "filing", "announcement_url", "currency", "unit", "basis", "format",
-            "notes", "source_pdf", "pages", "model")
+            "notes", "source_pdf", "pages", "model", "verdict", "presentation")
     raw = json.dumps({"n": small, "m": {k: meta.get(k) for k in keep if meta.get(k)}}, separators=(",", ":"))
     d = base64.urlsafe_b64encode(zlib.compress(raw.encode(), 9)).decode().rstrip("=")
     return f"{ctx.base_url}/api/download?" + urlencode({"op": "download", "d": d, "s": _sign(d)})
@@ -455,15 +473,34 @@ def decode_download(d: str, s: str) -> tuple[dict, dict]:
 def results_text(ctx: Context, normalised: dict, meta: dict, formats: dict, header: list[str]) -> dict:
     from .excel_writer import merge_records, run_checks
     fails = checks.failures(normalised)
+    verdict = meta.get("verdict") or checks.verdict(normalised, meta.get("presentation", ""))
+    meta = {**meta, "verdict": verdict}
     summary = run_checks(merge_records([], normalised, meta))
     counts = {s: sum(c["status"] == s for c in summary) for s in ("PASS", "FAIL", "derived", "n/a")}
     link = download_link(ctx, normalised, meta)
-    lines = [*header, f"Checks: {counts['PASS']} pass, {counts['FAIL']} fail, {counts['derived']} derived, {counts['n/a']} n/a."]
+    lines = [*header, f"Checks: {counts['PASS']} pass, {counts['FAIL']} fail, {counts['derived']} derived, {counts['n/a']} n/a.",
+             "Verdict: " + ("OK, the figures are confirmed by their printed totals." if verdict["ok"] else
+                            "NOT VERIFIED: " + "; ".join(verdict["reasons"]) + ". Don't present these figures as "
+                            "checked; fix what is listed below, or tell the user what is wrong.")]
     if fails:
         factor = next((b.get("step", 1.0) for b in normalised.values()), 1.0)
         lines += ["", "These tie-outs FAIL (figures in the filing's own unit). Re-read the lines involved on the page "
                       "images — digit, column, sign, and whether a total was taken for a sub-total — then call "
                       "submit_statements again with the whole corrected JSON:", checks.describe(fails, normalised, factor)]
+    gaps = checks.gross_profit_gaps(normalised)
+    if gaps and checks.has_figures(normalised.get("income_statement")):
+        lines += ["", "Gross profit is blank. Never leave it blank:", checks.describe_gaps(gaps, normalised),
+                  "Then call submit_statements again with the whole JSON."]
+    if not verdict["pass"] and not fails:
+        lines += ["", "No tie-out check passes: the totals that confirm the figures (gross profit, profit before tax, "
+                      "tax and profit after tax, total assets / liabilities / equity, cash at the beginning and end) "
+                      "weren't read. Read them from the statements; if the filing has no formal financial statements "
+                      "(only a presentation or highlights), tell the user instead."]
+    missing = [name for st, name in checks.STATEMENT_NAMES.items() if not checks.has_figures(normalised.get(st))]
+    if missing:
+        it = "it" if len(missing) == 1 else "them"
+        lines += ["", f"No {checks.join_or(missing)} was read. Find {it} in the filing (open_filing with pages=[...] "
+                      f"shows any page) and submit again, or tell the user the filing doesn't have {it}."]
     lines += [_figures_table(normalised, formats), "", f"Excel workbook (Income Statement, Balance Sheet, Cash Flow, "
               f"Checks, Source Map): {link}",
               "To add these periods to an earlier workbook, upload it in the web app under Settings → Merge."]
@@ -493,6 +530,7 @@ def submit_tool(args: dict, ctx: Context) -> dict:
         "source_pdf": args.get("source_pdf", ""), "pages": ",".join(map(str, pages)),
         "model": "Claude (via MCP connector)", "vision": True,
     }
+    meta["verdict"] = checks.verdict(normalised)
     head = [f"{meta['company_name'] or 'Filing'} — {meta['format']} format, {meta['currency']} "
             f"(read in {meta['unit'] or extractor.DEFAULT_UNIT}, shown in '000), basis: {meta['basis'] or '?'}"]
     return results_text(ctx, normalised, meta, formats, head)

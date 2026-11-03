@@ -39,10 +39,16 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    do during extraction, before any AI call. Only the consolidated filing is extracted. A filing whose PDF turns out to hold no statements (no
    statement titles, no number tables, or notice wording such as "intends to release its
    financial results") is marked "Not a results filing" before any AI call.
+   **Presentations only**: some results announcements carry nothing but slides. A PDF made in
+   PowerPoint (Keynote, Impress…), with 16:9 pages, or with landscape pages of little text and slide
+   words (agenda, disclaimer, Q&A, thank you) is a presentation; unless its pages are headed by all
+   three statement titles it is marked **Slides only** ("a presentation without the formal financial
+   statements") before any AI call, and stays on screen with an **Ask Claude** button.
 3. **Pick the financial statements PDF** (no AI): attachments are tried by name, results /
    financial statements first and presentations, slides and media releases last, and the first
-   one whose pages hold all three statements is used; the others are never downloaded. The card
-   shows which PDF was extracted.
+   one whose pages hold all three statements is used; the others are never downloaded. A slide
+   deck is never that PDF, even when named "Results": another attachment with the statements is
+   preferred to it. The card shows which PDF was extracted.
 4. **Non-AI page scan** (`sgx_fin/page_scanner.py`): scores every page against keyword sets
    (statement titles such as *"statement of financial position"*, line items such as *"total
    assets"*, *"net cash from operating activities"*, plus numeric density) and penalises notes,
@@ -58,10 +64,18 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    Statements that are **pictures** take their own route first (see below).
 6. **Check and correct** (`sgx_fin/checks.py`): parts must add up to their printed totals (PBT +
    tax = PAT, interest income + interest expense = net interest income, assets = liabilities +
-   equity, cash at the beginning + net change = cash at the end, …). A figure whose sign was read
-   backwards is flipped where that, and only that, makes a failing check add up. Any check still
-   failing sends the pages back to the AI once with the failing lines pointed out; the second
-   reading's figures are taken only where they make the totals add up.
+   equity, cash at the beginning + net change = cash at the end, …). A pass has to prove
+   something: a check whose figures are all 0 **fails** ("every figure is 0": lines read as 0 that may
+   not be printed at all), and the slack allowed is only the rounding of the figures involved (half
+   of the filing's unit each, or of its decimals when every figure has some), never a share of the
+   total, so a misread digit can't hide inside 0.2% of a bank's total assets. A figure whose sign was
+   read backwards is flipped where that, and only that, makes a failing check add up. Any check still
+   failing, or gross profit left blank, sends the pages back to the AI once with the failing lines
+   pointed out; the second reading's figures are taken only where they make the totals add up (or
+   leave out lines the first reading invented as 0), and its gross expense where the first had none.
+   **Verdict**: an extraction is *verified* only when at least one check passes, none fails, every
+   statement has figures and gross profit isn't blank. **0 checks pass is a failure**, not a success:
+   nothing confirms such figures (a presentation's highlights, a page read as zeros).
 7. **Excel** (`sgx_fin/excel_writer.py`): rescales to `'000`, writes the sheets in the chosen format,
    reports the tie-out checks and **merges** new periods into an existing workbook so
    quarters/half-years/full years accumulate.
@@ -101,9 +115,9 @@ the browser and sent with each extraction; **Download as JSON** and add the file
 to make it the default for everyone. Imported entries are matched by meaning ("Cost of Sales",
 "Taxation", "PATMI"…) to the built-in ones, so derived lines and tie-out checks keep working.
 
-**Banks** get their own layout: Interest Income, Interest Expense, Net Interest Income, Fee &
-Commission Income, Other Non-Interest Income, Operating Expenses, Operating Profit before
-Allowances, Allowances, then PBT to EPS; and a balance sheet of Cash & Central Bank Balances,
+**Banks** get their own layout: Gross Income, Gross Expense, Gross Profit, then Interest Income,
+Interest Expense, Net Interest Income, Fee & Commission Income, Other Non-Interest Income, Operating
+Expenses, Operating Profit before Allowances, Allowances, then PBT to EPS; and a balance sheet of Cash & Central Bank Balances,
 Due from Banks, Investments, Loans & Advances, Deposits, Due to Banks, Borrowings and equity.
 The AI classifies each filing as `bank` or `general`; consolidated statements are preferred over
 standalone ones. Totals a bank doesn't print (net interest income, total operating income,
@@ -120,11 +134,24 @@ filing that states no unit is taken as thousands. Each figure comes back tagged 
 it sits under, so a blank cell can't shift numbers into the wrong period, and period columns are
 grouped by length (full year, half year, quarter) with the latest first.
 
-**No cost of sales line?** Companies that present expenses by nature report no cost of sales or
-gross profit. The AI then extracts *Raw materials, consumables used and changes in inventories*,
-*Employee benefits expenses* and *Depreciation and amortisation*, and the program derives
-**Cost of Goods Sold** = the sum of those three and **Gross Profit** = Revenue − Cost of Goods Sold.
-Both are marked "computed" in the Source Map, and the gross-profit check shows "derived".
+**Gross profit is never left blank.** When a filing prints it, it is taken as printed. When not,
+the program works it out as Revenue + Cost of Goods Sold (the gross expense, negative), and the gross
+expense comes from, in order:
+
+- a cost of sales / cost of revenue line, as printed;
+- **expenses by nature**: *Raw materials, consumables used and changes in inventories* + *Employee
+  benefits expenses* + *Depreciation and amortisation*, added up by the program;
+- **the AI's judgement**: it screens the statement for the expense lines that are the cost of earning
+  the revenue and gives their sum, e.g. a finance or insurance company without a gross expense line:
+  *Financial cost associated with financial income* + *Provision for credit losses* + *Insurance
+  service expenses* + *Operating cost*. The Source Map lists the lines it added ("A + B + C + D");
+- **banks** (bank format): **Gross Income** = interest income + fee and other non-interest income (an
+  Indian bank's "Total Income"), **Gross Expense** = interest expense + operating expenses +
+  allowances, **Gross Profit** = the difference, at the top of the bank layout.
+
+Gross profit still blank after the first reading gets a second, targeted look; if it stays blank the
+extraction is not verified. Worked-out lines are marked "computed" in the Source Map, and the
+gross-profit check shows "derived".
 
 Formats are loaded by **`sgx_fin/template.py`**; importing and the editable text form are in
 **`sgx_fin/formats.py`**.
@@ -141,6 +168,14 @@ yellow, Fraunces + Outfit, rounded cards, one accent colour per company):
 - **Announcement cards**: one per filing, with links to the PDFs in its attachment list and a
   single **Extract** button; progress shows on the card, then the button becomes **Excel**.
   Click a company's name for the pages chosen, the tie-out checks and "Wrong pages?" re-runs.
+- **Check failed**: a workbook whose figures aren't verified (a check fails, **0 checks pass**, a
+  statement or gross profit is missing) is not shown as "Excel ready". The card turns red with the
+  reasons ("Not verified: 0 checks pass · no balance sheet or cash flow · gross profit blank") and a
+  **Check with Claude** button: a new Claude chat opens with the filing, the failing checks and the
+  statement pages, asking Claude to read the pages itself through the connector (not
+  `extract_filing`, which repeats the reading that failed) and reply with an Excel link. The workbook
+  can still be downloaded (marked not verified). **Slides only** cards offer **Ask Claude**, and
+  extraction errors **Read it with Claude** in the details.
 - **Extract all** works through every card (two at a time) and becomes **Download all** (zip).
 - **Choose download folder** (Chrome / Edge): every workbook is saved straight into that folder,
   one file per company, and a new filing is merged into the company's file already there.
@@ -181,7 +216,13 @@ filing already typed in (the connector does the rest and replies with the Excel 
 Gemini**, Escape, or 30 seconds without an answer carries on with the server's AI. The card then
 offers **Open in Claude** and **Use Gemini** to change your mind. Long scanned documents come as small previews first so Claude picks the
 statement pages. Text filings still go to the server's AI (`extract_filing`), unless Claude asks
-for them as images.
+for them as images; a text page read as images comes with its text layer, so the digits are exact.
+
+`submit_statements` and `extract_filing` end with a **verdict** (OK, or NOT VERIFIED with the
+reasons) and tell Claude what to do: re-read failing lines, read the missing totals or statement,
+judge the gross expense when gross profit is blank, or tell you the filing has no formal statements
+(a presentation). `open_filing` says when a filing was set aside as not results (e.g. slides only),
+and still shows its pages with `as_images=true`.
 
 | Tool | What it does |
 |---|---|
@@ -270,7 +311,7 @@ SGX's terms of use apply to the data you retrieve; keep request volumes modest.
 | Sheet | Contents |
 |---|---|
 | Income Statement / Balance Sheet / Cash Flow | The format's rows, one column per period (grouped by length, latest first), `'000` of reporting currency, EPS in cents |
-| Checks | Arithmetic tie-outs per period: PASS / FAIL / n/a |
+| Checks | Each filing's verdict first (OK, or NOT VERIFIED and why), then the tie-outs per period: PASS / FAIL (with a note when every figure is 0) / derived / n/a. A filing that isn't verified also gets a red "Not verified" line above every statement |
 | Source Map | For every figure: the company's own line label, filing, PDF, pages and model |
 | Transcription | Picture filings only: the tables as read from the pictures, corrections in green, doubtful rows in yellow |
 
@@ -281,6 +322,7 @@ python tests/test_offline.py               # scanner, pictures, checks, schema, 
 python tests/accuracy.py 2V6B.xlsx          # score a workbook against tests/answers/ (Bank of Baroda by default)
 CHROME_PATH=/path/to/chrome node tests/browse_test.mjs   # browser scraper vs a stand-in SGX site
 NODE_PATH=$(npm root -g) node tests/make_sample_pdf.cjs   # regenerate the sample PDF (needs playwright)
+NODE_PATH=$(npm root -g) node tests/make_deck_pdf.cjs     # the slides-only results deck
 ```
 
 ## Limits
@@ -293,3 +335,5 @@ NODE_PATH=$(npm root -g) node tests/make_sample_pdf.cjs   # regenerate the sampl
   of a long scanned document yourself.
 - Banks, insurers and REITs use different statement formats; figures map to the closest lines and
   the AI notes the format in the **notes** field. Check the **Checks** sheet before relying on numbers.
+- A verified extraction is one whose printed totals confirm it; a misread that keeps every total adding
+  up, or a judged gross expense that adds the wrong lines, can't be caught that way.

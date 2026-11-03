@@ -7,6 +7,7 @@ Then open http://127.0.0.1:5000
 """
 
 import argparse
+import json
 import re
 import importlib.util
 import shutil
@@ -56,14 +57,20 @@ def install_mocks():
         ("ABB", "ABC HOLDINGS LTD", "20:01", "Financial Statements and Related Announcement::Full Yearly Results"),
         # statements that are scanned pictures: found, copied, checked and re-read
         ("2V6B", "BANK OF BARODA", "19:39", "Financial Statements and Related Announcement::Second Quarter and/ or Half Yearly Results"),
+        # a results announcement whose only PDF is a slide deck: set aside before any AI call
+        ("PPT", "PRESENTATION ONLY LTD", "18:30", "Financial Statements and Related Announcement::Half Yearly Results"),
+        # an extraction nothing confirms (highlights only, no balance sheet or cash flow): Check failed
+        ("HLT", "HIGHLIGHTS HOLDINGS LTD", "18:40", "Financial Statements and Related Announcement::Third Quarter Results"),
     ]
     named = {
         "NVA": ["20261030_NVLG_CONSOLIDATED_FS_2026Q3.pdf", "20261030_NVLG_EXPLANATION_CONSOL_FS_2026Q3.pdf"],
         "NVB": ["20261030_NVLG_SEPARATE_FS_2026Q3.pdf", "20261030_NVLG_EXPLANATION_SEP_FS_2026Q3.pdf"],
         "ABA": ["ABC FY2026 Results A.pdf"], "ABB": ["ABC FY2026 Results B.pdf"],
+        "PPT": ["1H FY2026 Results.pdf"],
     }
     separate = ROOT / "tests" / "separate_results.pdf"
     notice = ROOT / "tests" / "notice.pdf"
+    deck = ROOT / "tests" / "deck_results.pdf"
     (ROOT / "tests" / "out").mkdir(exist_ok=True)
     scanned = picture_pdf(sample, ROOT / "tests" / "out" / "mock_SESGXFINAL.pdf")
 
@@ -93,13 +100,19 @@ def install_mocks():
         dest_dir.mkdir(parents=True, exist_ok=True)
         out = dest_dir / (re.sub(r"[^A-Za-z0-9_.-]+", "_", url.split("/FileOpen/")[-1].split(".ashx")[0])[-60:] + ".pdf")
         src = (notice if ("KSH" in url or "NTC" in url) else separate if ("NVB" in url or "ABB" in url)
-               else scanned if "2V6B" in url else sample)
+               else scanned if "2V6B" in url else deck if "PPT" in url else sample)
         shutil.copy(src, out)
         return out
 
     def extract(pdf, pages, **kw):
         time.sleep(2.5)
-        data = {**FAKE, "notes": "Mock extraction from the sample PDF; figures are illustrative."}
+        data = json.loads(json.dumps({**FAKE, "notes": "Mock extraction from the sample PDF; figures are illustrative."}))
+        if "F13" in pdf.name:  # total assets misread by 300: two checks fail, on the second look too
+            data["balance_sheet"]["rows"][2]["values"][0] += 300
+        if "HLT" in pdf.name:  # highlights only: revenue and profit, nothing a printed total confirms
+            data["income_statement"]["rows"] = [r for r in data["income_statement"]["rows"]
+                                                if r["key"] in ("revenue", "pat_shareholders", "eps_basic")]
+            data["balance_sheet"] = data["cash_flow"] = {"page_numbers": [], "periods": [], "rows": []}
         return extractor.Extraction(data, "mock " + extractor.default_model(), {"input_tokens": 6120, "output_tokens": 2310})
 
     def locate(pdf, pages, **kw):

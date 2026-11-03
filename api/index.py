@@ -276,6 +276,8 @@ def process():
         "basis": scan.basis,  # consolidated | separate | unknown
         "ai_locate": scan.needs_ai_locate,  # keywords missing: the AI finds the statements
         "missing": scan.missing,
+        "presentation": scan.presentation,  # slides ("made in PowerPoint", "16:9 slides"), "" otherwise
+        "titled": scan.titled,  # statements headed by a statement title (formal statements)
     }
     timings = {"download_and_scan": round(time.monotonic() - started, 1)}
     reason = None if pages else not_results_reason(pdf, scan)
@@ -304,6 +306,7 @@ def process():
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", res.meta.get("stock_code") or res.meta.get("company_name") or "").strip("_") or "financials"
     return jsonify(
         scan=scan_info, pages=res.pages, extracted=True, meta=res.meta, usage=res.usage, checks=checks, timings=timings,
+        verdict=res.meta.get("verdict"),  # this filing's own: ok only when its figures are confirmed
         filename=f"{name}.xlsx", workbook_b64=base64.b64encode(data).decode(),
     )
 
