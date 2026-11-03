@@ -26,7 +26,7 @@ from pathlib import Path
 
 from pypdf import PdfReader, PdfWriter
 
-from . import checks
+from . import checks, industries
 from . import template as T
 
 CLAUDE_DEFAULT = "claude-opus-5-5"
@@ -93,7 +93,47 @@ def _statement_schema(statement: str, formats: dict) -> dict:
     }
 
 
-def build_schema(formats: dict | None = None) -> dict:
+COGS_METHODS = ("printed", "by_nature", "judged", "none")
+
+
+def _cogs_basis_schema() -> dict:
+    return {
+        "type": "object",
+        "description": "How the cost of sales (COGS) is made up",
+        "properties": {
+            "method": {"type": "string", "enum": list(COGS_METHODS)},
+            "lines": {
+                "type": "array",
+                "description": "No cost of sales printed: every expense line on the face of the income statement above "
+                               "profit from operations, with its figures in the income statement's columns",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source_label": {"type": "string"},
+                        "cells": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {"col": {"type": "integer"}, "value": {"type": "number"}},
+                                "required": ["col", "value"],
+                                "additionalProperties": False,
+                            },
+                        },
+                        "in_cogs": {"type": "boolean"},
+                        "why": {"type": "string"},
+                    },
+                    "required": ["source_label", "cells", "in_cogs", "why"],
+                    "additionalProperties": False,
+                },
+            },
+            "explanation": {"type": "string", "description": "what the COGS is made of, what was left out and why"},
+        },
+        "required": ["method", "lines", "explanation"],
+        "additionalProperties": False,
+    }
+
+
+def build_schema(formats: dict | None = None, rules: dict | None = None) -> dict:
     formats = formats or T.BUILTIN
     return {
     "type": "object",
@@ -101,16 +141,20 @@ def build_schema(formats: dict | None = None) -> dict:
         "company_name": {"type": "string"},
         "format": {"type": "string", "enum": list(formats),
                    "description": "id of the format whose 'use for' fits this company"},
+        "industry": {"type": "string", "enum": industries.ids(rules or industries.for_filing()),
+                     "description": "the company's industry, from the list in the rules"},
+        "industry_evidence": {"type": "string", "description": "the words in the filing that show the industry"},
         "currency": {"type": "string", "description": "ISO code, e.g. SGD, USD, RMB, INR"},
         "unit": {"type": "string", "enum": list(UNIT_FACTORS)},
         "basis": {"type": "string", "description": "Group (consolidated), Standalone or Company"},
         "income_statement": _statement_schema("income_statement", formats),
         "balance_sheet": _statement_schema("balance_sheet", formats),
         "cash_flow": _statement_schema("cash_flow", formats),
+        "cost_of_sales_basis": _cogs_basis_schema(),
         "notes": {"type": "string"},
     },
-    "required": ["company_name", "format", "currency", "unit", "basis",
-                 "income_statement", "balance_sheet", "cash_flow", "notes"],
+    "required": ["company_name", "format", "industry", "industry_evidence", "currency", "unit", "basis",
+                 "income_statement", "balance_sheet", "cash_flow", "cost_of_sales_basis", "notes"],
     "additionalProperties": False,
     }
 
@@ -145,11 +189,13 @@ Rules:
 - Income statement and cash flow periods are durations: months = 3 (quarter ended), 6 (half year / six months ended), 9 (nine months ended) or 12 (year ended). Balance sheet columns are dates: months = 0. period_end is the column's end date as YYYY-MM-DD.
 - Map each template key to the line the company reports. If a template line is a sum of several reported lines (e.g. "Reserves" = retained earnings + other reserves), add them and list the source labels joined with " + ". If a company line has no matching key, fold it into the closest "Other ..." key.
 - Only include a key if the filing gives the figure (or it is a direct sum of shown figures). Omit keys you cannot support; never invent numbers.
-- Gross profit must never end up blank, so check whether it is printed. If it is, give it as printed. If not, leave gross_profit out: the program works it out as revenue + cost_of_sales, so cost_of_sales (the gross expense) is what you must provide:
-  - a cost of sales / cost of revenue line: as printed;
-  - expenses by nature (general format): fill raw_materials (raw materials, consumables used and changes in inventories), employee_benefits and depreciation_amortisation from the face of the statement and leave cost_of_sales out: the program adds them up;
-  - bank format: map interest expense, operating expenses and allowances to their own keys and the program adds them up; give revenue / cost_of_sales only when one printed line is the whole gross income ('Total Income' = interest earned + other income) or the whole gross expense;
-  - otherwise use your judgement: screen the statement for the expense lines that are the cost of earning the revenue and give their sum as cost_of_sales, negative, with the source labels joined with " + ". E.g. a bank, finance or insurance company without a gross expense line: financial cost associated with financial income + provision for credit losses + insurance service expenses + operating costs; a service company: its direct costs of services.
+- `industry`: the company's industry from the list at the end, judged by what it sells and how it earns its revenue; `industry_evidence`: the words in the filing that show it (e.g. "sale of precision parts; raw materials and consumables used").
+- Gross profit must never end up blank, and how the cost of sales (COGS, the gross expense) is made up must be shown in `cost_of_sales_basis`:
+  - a cost of sales / cost of revenue line is printed: map it to cost_of_sales (and gross_profit if printed); method "printed", lines [], explanation e.g. "Cost of sales as printed".
+  - none is printed: leave cost_of_sales and gross_profit out. List in `lines` EVERY expense line on the face of the income statement above profit from operations (not finance costs, tax or share of associates), each with its figures in `cells` under the income statement's columns, with the sign it has on profit (costs negative, an increase in inventories positive). Mark `in_cogs` by the industry's COGS rule (a rule the user gave for this company comes first) and say `why` in a few words. Materials always go in: raw materials, consumables, purchases, changes in inventories, cost of inventories. Do not add them up: the program adds the lines marked in_cogs and works out gross profit = revenue + COGS. method "by_nature" when the statement lists expenses by nature, else "judged"; `explanation`: one or two sentences on what the COGS is made of, what was left out and why.
+  - nothing on the statement is a cost of earning the revenue (e.g. an investment holding company's dividends): mark no line in_cogs, method "none", and explain; gross profit then equals revenue.
+  - expenses by nature (general format): still fill raw_materials, employee_benefits and depreciation_amortisation from the face of the statement.
+  - bank format: gross income (revenue) is interest income + non-interest income ('Total Income' when printed as one line); interest expense, operating expenses and allowances go to their own keys as well as into `lines`.
 - Other totals (net interest income, total assets, net cash from operating activities...) must be the printed totals, not your own arithmetic, when they are printed; leave them out when not printed.
 - `page_numbers` are the page numbers within the attached excerpt (1-based) the statement came from.
 - Put caveats (restatements, unusual presentation, standalone figures used) in `notes`.
@@ -158,8 +204,8 @@ Template keys:
 """
 
 
-def build_system(formats: dict | None = None) -> str:
-    return RULES + _template_text(formats or T.BUILTIN)
+def build_system(formats: dict | None = None, rules: dict | None = None) -> str:
+    return RULES + _template_text(formats or T.BUILTIN) + "\n\n" + industries.prompt(rules)
 
 
 SCHEMA = build_schema()  # the built-in formats; extract() rebuilds both for imported formats
@@ -279,14 +325,14 @@ GAPS = ("\n\nA first reading of these pages left gross profit blank:\n{gaps}\nRe
 def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str = "high",
             cache_dir: Path | None = None, client=None, vision: bool = False,
             locate: bool = False, deadline: float | None = None, formats: dict | None = None,
-            context: str = "", recheck: str = "", gaps: str = "") -> Extraction:
+            context: str = "", recheck: str = "", gaps: str = "", cogs: dict | None = None) -> Extraction:
     """Send only `pages` of `pdf` to the AI and return the parsed JSON.
 
     Picture pages (vision=True) go to the main provider as sharp images (Gemini: Flash, then
     Flash-Lite), with GLM 5.3 Flash behind it when GLM_FLASH is set; everything else goes to the
     main provider as a PDF excerpt. `context` is added to the instruction (what the pages are);
     `recheck` lists checks a first reading failed, and `gaps` where it left gross profit blank, for a
-    second look. `deadline`
+    second look. `cogs`: the industries and COGS rules for this filing (industries.for_filing). `deadline`
     (time.monotonic()) bounds the whole step.
     """
     from . import glm
@@ -300,7 +346,7 @@ def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str =
         raise RuntimeError("No AI key configured: set GEMINI_API_KEY (or GLM_FLASH for picture filings)")
 
     formats = formats or T.BUILTIN
-    system, schema = build_system(formats), build_schema(formats)
+    system, schema = build_system(formats, cogs), build_schema(formats, cogs)
     pdf_bytes = excerpt_pdf(pdf, pages)
     instruction = _instruction(pdf, pages, vision, locate) + (f"\n\n{context}" if context else "")
     if recheck:
@@ -356,7 +402,7 @@ Fill the template from them, as you would from the statements themselves. `perio
 
 def extract_text(pdf: Path, pages: list[int], tables: str, model: str | None = None, effort: str = "high",
                  cache_dir: Path | None = None, client=None, deadline: float | None = None,
-                 formats: dict | None = None, recheck: str = "", gaps: str = "") -> Extraction:
+                 formats: dict | None = None, recheck: str = "", gaps: str = "", cogs: dict | None = None) -> Extraction:
     """Fill the template from tables already transcribed as text (picture filings): no pictures,
     so the main provider's text model maps them (GLM when there is no other key)."""
     from . import glm
@@ -364,7 +410,7 @@ def extract_text(pdf: Path, pages: list[int], tables: str, model: str | None = N
     prov = provider()
     deadline = deadline or time.monotonic() + 120
     formats = formats or T.BUILTIN
-    system, schema = build_system(formats), build_schema(formats)
+    system, schema = build_system(formats, cogs), build_schema(formats, cogs)
     instruction = TABLES_INSTRUCTION.format(pages=pages, name=pdf.name, tables=tables)
     if recheck:
         instruction += RECHECK.format(fails=recheck).replace("Read the lines involved again, digit by digit, and check",
@@ -623,6 +669,120 @@ def _derive_bank_gross(values: dict, labels: dict, n: int) -> None:
                                    else "computed: interest expense + operating expenses + allowances (gross expense)")
 
 
+def _cogs_basis(data: dict, periods: list[dict], factor: float, rules: dict | None) -> dict:
+    """How the COGS is made up, as the AI gave it: the industry (the user's rule for the company first,
+    else the AI's answer, else what the filing's own words point to), the method, and every expense
+    line with its figures ('000), whether it is in COGS and why."""
+    rules = rules or industries.for_filing()
+    raw = data.get("cost_of_sales_basis") if isinstance(data.get("cost_of_sales_basis"), dict) else {}
+    cols = [p["col"] for p in periods]
+    lines = []
+    for ln in raw.get("lines") or []:
+        if isinstance(ln, dict):
+            vals = [None if v is None else round(v * factor, 3) for v in _row_values(ln, cols)]
+            lines.append({"label": str(ln.get("source_label") or "").strip() or "(unlabelled line)", "values": vals,
+                          "in_cogs": bool(ln.get("in_cogs")), "why": str(ln.get("why") or "").strip()})
+    words = [str(r.get("source_label") or "") for st in ("income_statement", "balance_sheet")
+             for r in (data.get(st) or {}).get("rows") or [] if isinstance(r, dict)]
+    hint = industries.guess([*words, *(ln["label"] for ln in lines), str(data.get("company_name") or "")], rules)
+    company = rules.get("company") or {}
+    given = str(data.get("industry") or "").strip().lower()
+    if company.get("industry"):
+        iid, evidence, by = company["industry"], f"your rule for {company['match']}", "you"
+    elif given in industries.ids(rules):
+        iid, evidence, by = given, str(data.get("industry_evidence") or "").strip(), "AI"
+    elif hint:
+        iid, evidence, by = hint[0], "its lines: " + ", ".join(hint[1]), "the filing's words"
+    else:
+        iid, evidence, by = industries.FALLBACK, "", "default"
+    method = str(raw.get("method") or "").strip().lower()
+    basis = {"industry": iid, "industry_name": industries.name(rules, iid), "evidence": evidence, "decided_by": by,
+             "rule": industries.rule_used(rules, iid), "method": method if method in COGS_METHODS else "",
+             "explanation": str(raw.get("explanation") or "").strip(),
+             "periods": [{"period_end": p["period_end"], "months": p["months"], "label": p.get("label", "")} for p in periods],
+             "lines": lines}
+    if hint and hint[0] != iid and by == "AI":
+        basis["also_suggests"] = f"{industries.name(rules, hint[0])} ({', '.join(hint[1])})"
+    return basis
+
+
+WORKED_OUT = ("judged", "computed", "your choice", "formula")
+
+
+def _apply_cogs(values: dict, labels: dict, n: int, basis: dict, prefix: str = "judged") -> None:
+    """Cost of Goods Sold from the lines marked in the basis, where no cost of sales is printed: their
+    sum; 0 when the basis says nothing is a cost of earning the revenue."""
+    if any(v is not None for v in values.get("cost_of_sales", [])):
+        return
+    picked = [ln for ln in basis["lines"] if ln["in_cogs"]]
+    if picked:
+        cogs = [None if all(ln["values"][i] is None for ln in picked)
+                else round(sum(ln["values"][i] or 0 for ln in picked), 3) for i in range(n)]
+        label = f"{prefix} ({basis['industry_name']}): " + " + ".join(ln["label"] for ln in picked)
+    elif basis["method"] == "none":
+        cogs = [None if r is None else 0.0 for r in values.get("revenue") or [None] * n]
+        label = f"{prefix} ({basis['industry_name']}): no direct cost of earning the revenue"
+    else:
+        return
+    if any(c is not None for c in cogs):
+        values["cost_of_sales"], labels["cost_of_sales"] = cogs, label
+
+
+def _settle_basis(basis: dict, values: dict, labels: dict) -> None:
+    """The basis records the COGS it ended in and how, whoever worked it out."""
+    cogs = values.get("cost_of_sales")
+    label = str(labels.get("cost_of_sales", ""))
+    basis["cogs"] = list(cogs) if cogs else None
+    basis["cogs_label"] = label
+    basis["gross_profit_label"] = str(labels.get("gross_profit", ""))
+    if cogs and not label.startswith(WORKED_OUT):
+        basis["method"] = "printed"
+        basis["explanation"] = basis["explanation"] or f"Cost of sales as printed: {label}."
+    elif label.startswith("computed"):  # the program's own sum (expenses by nature, a bank's lines)
+        basis["method"] = "program"
+        basis["explanation"] = basis["explanation"] or ("Worked out by the program: " + label.split(":", 1)[-1].strip() + ".")
+    elif not cogs:
+        basis["method"] = basis["method"] or "missing"
+        basis["explanation"] = basis["explanation"] or "No cost of sales is printed and none could be worked out."
+
+
+def recompute_cogs(normalised: dict, picks: list, formats: dict | None = None) -> list[str]:
+    """A user's correction of which lines are COGS for one filing: added up again, no AI. Worked-out
+    cost of sales, gross profit and formula entries are worked out again; printed figures stay.
+    Returns the lines now in COGS."""
+    block = normalised.get("income_statement") or {}
+    basis = block.get("cogs_basis")
+    if not isinstance(basis, dict) or not basis.get("lines"):
+        raise ValueError("This filing has no expense lines to choose from.")
+    if basis.get("method") == "printed":
+        raise ValueError("This filing prints its cost of sales; it is used as printed.")
+    lines = basis["lines"]
+    if not isinstance(picks, list) or len(picks) != len(lines):
+        raise ValueError(f"Say in or out for each of the {len(lines)} lines.")
+    n = len(block.get("periods") or [])
+    values, labels = block.setdefault("values", {}), block.setdefault("labels", {})
+    for ln, pick in zip(lines, picks):
+        ln["in_cogs"] = bool(pick)
+        ln["values"] = (list(ln.get("values") or []) + [None] * n)[:n]
+    for k in list(values):
+        if str(labels.get(k, "")).startswith(WORKED_OUT) and (k in ("cost_of_sales", "gross_profit")
+                                                               or str(labels.get(k, "")).startswith("formula")):
+            values.pop(k)
+            labels.pop(k, None)
+    chosen = [ln["label"] for ln in lines if ln["in_cogs"]]
+    basis["method"] = "chosen" if chosen else "none"
+    basis["explanation"] = ("Lines chosen by you: " + " + ".join(chosen) + "." if chosen
+                            else "You marked no line as a cost of earning the revenue: gross profit equals revenue.")
+    basis["rule"], basis["decided_by_cogs"] = "your choice for this filing", "you"
+    _apply_cogs(values, labels, n, basis, prefix="your choice")
+    rows = T.rows_for("income_statement", block.get("format"), formats)
+    _derive_gross_profit(values, labels, n, by_formula=any(r.key == "gross_profit" and r.formula for r in rows))
+    _apply_formulas("income_statement", rows, values, labels, n)
+    _settle_basis(basis, values, labels)
+    basis["method"] = "chosen" if chosen else "none"
+    return chosen
+
+
 def fill_gross_profit(first: dict, second: dict) -> list[str]:
     """When a first reading has no gross profit at all, take what a second reading found (matched by
     period): a printed gross profit, or the gross expense it judged, from which gross profit is worked
@@ -648,6 +808,9 @@ def fill_gross_profit(first: dict, second: dict) -> list[str]:
                 took.add(k)
     if "gross_profit" not in took:
         _derive_gross_profit(a["values"], a["labels"], n)
+    if took and b.get("cogs_basis"):
+        a["cogs_basis"] = b["cogs_basis"]
+        _settle_basis(a["cogs_basis"], a["values"], a["labels"])
     return sorted(took)
 
 
@@ -757,10 +920,12 @@ def _row_values(row: dict, cols: list[int]) -> list:
     return (vals + [None] * len(cols))[:len(cols)]
 
 
-def normalise(data: dict, formats: dict | None = None) -> dict:
+def normalise(data: dict, formats: dict | None = None, cogs: dict | None = None) -> dict:
     """Rescale to the template's output unit ('000) and key rows by template key.
 
-    Returns {statement: {"periods": [...], "values": {key: [..]}, "labels": {key: str}, "format": str}}.
+    Returns {statement: {"periods": [...], "values": {key: [..]}, "labels": {key: str}, "format": str}};
+    the income statement also carries "cogs_basis": the industry and how its COGS was made up.
+    `cogs`: the industries and COGS rules for this filing (industries.for_filing).
     """
     formats = formats or T.BUILTIN
     fmt = data.get("format") if data.get("format") in formats else ("general" if "general" in formats else next(iter(formats)))
@@ -792,10 +957,16 @@ def normalise(data: dict, formats: dict | None = None) -> dict:
         # line the filing didn't print, from parts the filing did print.
         _derive_bank(st, values, labels, n)
         rows = T.rows_for(st, fmt, formats)
+        basis = None
         if st == "income_statement":
+            # COGS: printed; else the lines the AI marked by the industry's rule; else the program's sums.
+            basis = _cogs_basis(data, periods, factor, cogs)
+            _apply_cogs(values, labels, n, basis)
             _derive_bank_gross(values, labels, n)
             _derive_gross_profit(values, labels, n, by_formula=any(r.key == "gross_profit" and r.formula for r in rows))
         _apply_formulas(st, rows, values, labels, n)
+        if basis:
+            _settle_basis(basis, values, labels)
         if st == "cash_flow" and "cf_net_operating" in values:
             capex = values.get("cf_capex", [None] * n)
             values["free_cash_flow"] = [
@@ -805,4 +976,6 @@ def normalise(data: dict, formats: dict | None = None) -> dict:
             labels["free_cash_flow"] = "computed: net operating cash flow + capex"
         # step: output units per unit of the filing (100 for lakhs), for rounding tolerance in checks
         out[st] = {"periods": periods, "values": values, "labels": labels, "format": fmt, "step": factor}
+        if basis:
+            out[st]["cogs_basis"] = basis
     return out

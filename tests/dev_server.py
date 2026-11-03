@@ -109,6 +109,26 @@ def install_mocks():
         data = json.loads(json.dumps({**FAKE, "notes": "Mock extraction from the sample PDF; figures are illustrative."}))
         if "F13" in pdf.name:  # total assets misread by 300: two checks fail, on the second look too
             data["balance_sheet"]["rows"][2]["values"][0] += 300
+        code = pdf.name.split("_")[0]
+        data["industry"] = {"D05": "bank", "U11": "bank", "Z74": "technology", "C6L": "transport", "5JK": "property",
+                            "NVA": "property", "ABA": "trading"}.get(code, "manufacturing")
+        data["industry_evidence"] = "mock: chosen by stock code"
+        data["cost_of_sales_basis"] = {"method": "printed", "lines": [], "explanation": "Cost of sales as printed."}
+        if code == "C6L":  # expenses by nature, no cost of sales: the AI judges the COGS line by line, the program adds it up
+            data["industry_evidence"] = "passenger and cargo flights; fuel, handling and aircraft maintenance"
+            data["income_statement"]["rows"] = [r for r in data["income_statement"]["rows"] if r["key"] not in ("cost_of_sales", "gross_profit")]
+            cell = lambda a, b: [{"col": 1, "value": a}, {"col": 2, "value": b}]  # noqa: E731
+            data["cost_of_sales_basis"] = {"method": "by_nature", "explanation": (
+                "No cost of sales is printed. The costs of flying are in: fuel, crew and operating staff, aircraft depreciation, "
+                "handling, maintenance and inflight costs; sales costs and head-office administration are left out."), "lines": [
+                {"source_label": "Fuel costs", "cells": cell(-28000, -25500), "in_cogs": True, "why": "fuel for the flights"},
+                {"source_label": "Staff costs", "cells": cell(-21000, -19000), "in_cogs": True, "why": "crew and operating staff"},
+                {"source_label": "Depreciation", "cells": cell(-12000, -11500), "in_cogs": True, "why": "mostly aircraft"},
+                {"source_label": "Handling charges", "cells": cell(-6500, -6000), "in_cogs": True, "why": "airport handling"},
+                {"source_label": "Aircraft maintenance and overhaul costs", "cells": cell(-5500, -5000), "in_cogs": True, "why": "fleet upkeep"},
+                {"source_label": "Inflight meals and other passenger costs", "cells": cell(-3200, -2900), "in_cogs": True, "why": "direct service cost"},
+                {"source_label": "Sales costs", "cells": cell(-4100, -3800), "in_cogs": False, "why": "selling, not flying"},
+                {"source_label": "Administrative expenses", "cells": cell(-2800, -2600), "in_cogs": False, "why": "head office"}]}
         if "HLT" in pdf.name:  # highlights only: revenue and profit, nothing a printed total confirms
             data["income_statement"]["rows"] = [r for r in data["income_statement"]["rows"]
                                                 if r["key"] in ("revenue", "pat_shareholders", "eps_basic")]

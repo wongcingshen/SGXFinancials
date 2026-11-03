@@ -16,7 +16,7 @@
      "key": "cost_of_sales",
      "label": "Cost of Goods Sold",
      "kind": "item",
-     "hint": "The gross expense: cost of sales / cost of revenue as printed; negative. Not printed: with expenses by nature, leave it out (the program adds raw materials, employee benefits and depreciation); otherwise judge which expense lines are the cost of earning the revenue and give their sum, source labels joined with ' + ' (a bank, finance or insurance company: e.g. financial cost associated with financial income + provision for credit losses + insurance service expenses + operating costs)"
+     "hint": "The gross expense: cost of sales / cost of revenue as printed; negative. Not printed: leave it out and list the expense lines in cost_of_sales_basis, marked by the industry's COGS rule (materials always in): the program adds the marked lines"
     },
     {
      "key": "raw_materials",

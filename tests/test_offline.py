@@ -976,9 +976,9 @@ def test_gross_profit_is_never_blank():
     from sgx_fin import checks, pipeline
 
     # The rules ask for judgement when no cost of sales is printed, with the lines a financial company uses.
-    assert "Gross profit must never end up blank" in extractor.SYSTEM
-    assert "financial cost associated with financial income + provision for credit losses + insurance service " \
-           "expenses + operating costs" in extractor.SYSTEM
+    assert "Gross profit must never end up blank" in extractor.SYSTEM and "Materials always go in" in extractor.SYSTEM
+    assert "- finance (Finance, leasing & securities;" in extractor.SYSTEM
+    assert "financial cost associated with financial income" in extractor.SYSTEM and "insurance service expenses" in extractor.SYSTEM
 
     # A finance company read with the general format: the gross expense judged (sign forgotten), gross profit worked out.
     fin = json.loads(json.dumps(FAKE))
@@ -1110,6 +1110,193 @@ def test_presentations_are_not_results():
         mcp_server.load_filing = old
 
 
+def by_nature(industry="manufacturing", lines=None, method="by_nature"):
+    """A reading with no cost of sales line: the expense lines listed, the COGS ones marked."""
+    d = json.loads(json.dumps(FAKE))
+    d["industry"], d["industry_evidence"] = industry, "precision parts; raw materials consumed"
+    d["income_statement"]["rows"] = [r for r in d["income_statement"]["rows"] if r["key"] not in ("cost_of_sales", "gross_profit")]
+    cell = lambda a, b: [{"col": 1, "value": a}, {"col": 2, "value": b}]  # noqa: E731
+    d["cost_of_sales_basis"] = {"method": method, "explanation": "Materials, the change in inventories and subcontracting; "
+                                "staff and depreciation are mostly head office.", "lines": lines if lines is not None else [
+        {"source_label": "Raw materials and consumables used", "cells": cell(-60_000, -54_000), "in_cogs": True, "why": "materials"},
+        {"source_label": "Changes in inventories", "cells": cell(1_500, -800), "in_cogs": True, "why": "goods made but unsold"},
+        {"source_label": "Subcontract costs", "cells": cell(-9_000, -8_000), "in_cogs": True, "why": "outsourced production"},
+        {"source_label": "Employee benefits expense", "cells": cell(-20_000, -18_500), "in_cogs": False, "why": "mostly head office"},
+        {"source_label": "Depreciation", "cells": cell(-6_000, -5_650), "in_cogs": False, "why": "office and factory together"}]}
+    return d
+
+
+def test_industries_and_cogs_rules():
+    from sgx_fin import industries as I
+
+    # The filing's own words point to its industry; generic lines point nowhere.
+    cases = {
+        "manufacturing": ["Raw materials and consumables used", "Changes in inventories of finished goods and work in progress"],
+        "trading": ["Purchases of goods for resale", "Changes in inventories", "Distribution costs", "Retail stores"],
+        "reit": ["Gross revenue", "Property expenses", "Net property income", "Trustee's fee", "Distribution to unitholders"],
+        "bank": ["Interest earned", "Interest expended", "Net interest income", "Deposits", "Advances"],
+        "insurance": ["Insurance revenue", "Insurance service expenses", "Net expenses from reinsurance contracts held"],
+        "finance": ["Financial cost associated with financial income", "Provision for credit losses", "Hire purchase receivables"],
+        "construction": ["Contract revenue", "Contract costs", "Subcontract costs"],
+        "transport": ["Fuel costs", "Vessel operating costs", "Charter hire", "Port charges"],
+        "hospitality": ["Room revenue", "Gaming revenue", "Casino", "Resort operating costs"],
+        "resources": ["Sales of crude palm oil", "Plantation upkeep", "Harvesting costs"],
+        "investment_holding": ["Dividend income", "Investment income", "Fair value gain on financial assets"],
+    }
+    for want, words in cases.items():
+        assert (I.guess(words) or [None])[0] == want, (want, I.guess(words))
+    assert I.guess(["Revenue", "Other income", "Administrative expenses", "Finance costs"]) is None
+    assert not I._hit("gas", "gaskets and seals") and not I._hit("mine", "mineral water") and I._hit("manufactur", "manufacturing")
+
+    # A user's preferences: their version of a rule, a new industry, and a company's own rule.
+    custom = {"industries": [{"id": "manufacturing", "name": "Manufacturing", "cogs": "Materials only."},
+                             {"name": "Aquaculture", "applies_to": "Fish farms", "keywords": "fish feed, hatchery", "cogs": "Feed + fry + farm staff"}],
+              "companies": [{"match": "F13", "industry": "manufacturing", "cogs": "Raw materials + changes in inventories only"},
+                            {"match": "BARODA", "industry": "bank", "cogs": ""}]}
+    rules = I.for_filing(custom, "F13", "FU YU CORPORATION LIMITED")
+    tags = {i["id"]: i["source"] for i in rules["industries"]}
+    assert tags["manufacturing"] == "your version" and tags["aquaculture"] == "yours" and tags["bank"] == "built-in"
+    assert rules["company"]["match"] == "F13" and I.rule_used(rules, "manufacturing") == "your rule for F13"
+    assert I.for_filing(custom, "2V6B", "BANK OF BARODA")["company"]["industry"] == "bank"  # by a fragment of its name
+    assert I.rule_used(I.for_filing(custom), "manufacturing") == "your Manufacturing rule"
+    assert I.rule_used(I.for_filing(), "reit") == "the built-in REITs & business trusts rule"
+    text = I.prompt(rules)
+    assert "- aquaculture (Aquaculture; Fish farms). COGS (the user's own rule): Feed + fry + farm staff" in text
+    assert "The user's own rule for this company (\"F13\")" in text and "Raw materials + changes in inventories only" in text
+    assert "aquaculture" in extractor.build_schema(None, rules)["properties"]["industry"]["enum"]
+    assert "Raw materials + changes in inventories only" in extractor.build_system(None, rules)
+
+
+def test_cogs_is_judged_line_by_line_and_explained():
+    import base64
+    import importlib.util
+    import os
+    from sgx_fin import checks, glm, industries as I
+
+    # No cost of sales printed: the marked lines are added up by the program, and the basis says how.
+    n = extractor.normalise(by_nature(), None, I.for_filing())
+    inc, b = n["income_statement"], n["income_statement"]["cogs_basis"]
+    assert inc["values"]["cost_of_sales"] == [-67_500, -62_800]  # -60,000 + 1,500 - 9,000 ('000)
+    assert inc["labels"]["cost_of_sales"] == ("judged (Manufacturing & industrials): Raw materials and consumables used + "
+                                              "Changes in inventories + Subcontract costs")
+    assert inc["values"]["gross_profit"] == [53_012, 44_800]
+    assert (b["industry"], b["decided_by"], b["method"], b["rule"]) == (
+        "manufacturing", "AI", "by_nature", "the built-in Manufacturing & industrials rule")
+    assert b["evidence"] == "precision parts; raw materials consumed" and b["explanation"].startswith("Materials")
+    assert [ln["in_cogs"] for ln in b["lines"]] == [True, True, True, False, False] and b["lines"][3]["values"] == [-20_000, -18_500]
+
+    # The user's rule for the company decides the industry; with no answer, the filing's own words do.
+    rules = I.for_filing({"companies": [{"match": "ACME", "industry": "trading", "cogs": "Purchases only"}]}, "", "ACME HOLDINGS")
+    b = extractor.normalise(by_nature(), None, rules)["income_statement"]["cogs_basis"]
+    assert (b["industry"], b["decided_by"], b["rule"]) == ("trading", "you", "your rule for ACME")
+    nameless = by_nature(industry="")
+    b = extractor.normalise(nameless)["income_statement"]["cogs_basis"]
+    assert b["industry"] == "manufacturing" and b["decided_by"] == "the filing's words" and "raw materials" in b["evidence"]
+    # An answer the lines contradict is kept, but flagged.
+    b = extractor.normalise(by_nature(industry="bank"))["income_statement"]["cogs_basis"]
+    assert b["industry"] == "bank" and b["also_suggests"].startswith("Manufacturing & industrials (raw materials")
+
+    # Nothing is a cost of earning the revenue (an investment holding's dividends): COGS 0, gross profit = revenue.
+    none = by_nature(industry="investment_holding", method="none", lines=[
+        {"source_label": "Administrative expenses", "cells": [{"col": 1, "value": -900}], "in_cogs": False, "why": "head office"}])
+    inc = extractor.normalise(none)["income_statement"]
+    assert inc["values"]["cost_of_sales"] == [0, 0] and inc["values"]["gross_profit"] == [120_512, 107_600]
+    assert "no direct cost" in inc["labels"]["cost_of_sales"]
+
+    # Printed cost of sales: used as printed, and said so. The program's own sums are explained too.
+    b = extractor.normalise(FAKE)["income_statement"]["cogs_basis"]
+    assert b["method"] == "printed" and b["explanation"] == "Cost of sales as printed: Cost of sales."
+    old = json.loads(json.dumps(FAKE))
+    old["income_statement"]["rows"] = [r for r in old["income_statement"]["rows"] if r["key"] not in ("cost_of_sales", "gross_profit")] + [
+        {"key": "raw_materials", "source_label": "Raw materials", "values": [-50_000, -45_000]}]
+    b = extractor.normalise(old)["income_statement"]["cogs_basis"]  # a reading from before bases: the by-nature sum
+    assert b["method"] == "program" and b["explanation"].startswith("Worked out by the program: raw materials")
+
+    # GLM's free-form answer keeps the industry and the basis (numbers as printed text too).
+    raw = by_nature()
+    raw["cost_of_sales_basis"]["lines"][0]["cells"][0]["value"] = "(60,000)"
+    got = glm.coerce(raw)
+    assert got["industry"] == "manufacturing" and got["cost_of_sales_basis"]["lines"][0]["cells"][0]["value"] == -60_000.0
+
+    # A correction: other lines ticked, added up again without AI; printed figures can't be re-ticked.
+    n = extractor.normalise(by_nature())
+    chosen = extractor.recompute_cogs(n, [True, True, True, True, False])
+    inc = n["income_statement"]
+    assert chosen[-1] == "Employee benefits expense" and inc["values"]["cost_of_sales"] == [-87_500, -81_300]
+    assert inc["values"]["gross_profit"] == [33_012, 26_300] and inc["labels"]["cost_of_sales"].startswith("your choice")
+    assert inc["cogs_basis"]["method"] == "chosen" and inc["cogs_basis"]["explanation"].startswith("Lines chosen by you")
+    extractor.recompute_cogs(n, [False] * 5)
+    assert inc["values"]["cost_of_sales"] == [0, 0] and inc["cogs_basis"]["method"] == "none"
+    for bad, picks in ((extractor.normalise(FAKE), []), (extractor.normalise(by_nature()), [True])):
+        try:
+            extractor.recompute_cogs(bad, picks)
+            raise AssertionError("expected a refusal")
+        except ValueError:
+            pass
+
+    # The workbook shows how: a COGS Basis sheet (one entry per filing, a re-run replaces it) and the industry.
+    n = extractor.normalise(by_nature())
+    meta = {"company_name": "FU YU", "stock_code": "F13", "currency": "SGD", "filing": "1H2026", "industry": "Manufacturing & industrials"}
+    data, _ = workbook_bytes(None, n, meta)
+    wb = load_workbook(io.BytesIO(data))
+    assert wb["Income Statement"]["A2"].value.endswith("· Industry: Manufacturing & industrials")
+    rows = [[c for c in r if c is not None] for r in wb["COGS Basis"].iter_rows(values_only=True)]
+    assert rows[2] == ["1H2026 — industry: Manufacturing & industrials (precision parts; raw materials consumed)"]
+    assert rows[3] == ["Cost of goods sold: judged from expenses by nature, by the built-in Manufacturing & industrials rule"]
+    assert ["Raw materials and consumables used", -60_000, -54_000, "Yes", "materials"] in rows
+    assert ["Employee benefits expense", -20_000, -18_500, "No", "mostly head office"] in rows
+    assert rows[-1][:3] == ["Cost of goods sold", -67_500, -62_800]
+    extractor.recompute_cogs(n, [True, True, True, True, False])
+    data2, _ = workbook_bytes(data, n, meta)  # the correction replaces the filing's entry
+    later, _ = workbook_bytes(data2, extractor.normalise(by_nature()), {**meta, "filing": "FY2026"})
+    titles = [r[0].value for r in load_workbook(io.BytesIO(later))["COGS Basis"].iter_rows() if r[0].value and " — industry:" in str(r[0].value)]
+    assert titles == ["FY2026 — industry: Manufacturing & industrials (precision parts; raw materials consumed)",
+                      "1H2026 — industry: Manufacturing & industrials (precision parts; raw materials consumed)"]
+    assert any(r[0].value == "Employee benefits expense" and r[3].value == "Yes" for r in load_workbook(io.BytesIO(data2))["COGS Basis"].iter_rows())
+    from sgx_fin import formats as F
+    back = F.parse("General", "", filename="a.xlsx", data=data)  # the COGS Basis sheet isn't taken for a statement
+    assert "Raw materials and consumables used" not in [r["label"] for r in back["statements"]["income_statement"]["rows"]]
+
+    # The web API: rules in, the basis and the figures out; a correction rebuilds the workbook without AI.
+    spec = importlib.util.spec_from_file_location("vapp_cogs", HERE.parent / "api" / "index.py")
+    app = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(app)
+    client = app.app.test_client()
+    assert {i["id"] for i in client.get("/api/industries?op=industries").json["industries"]} >= {"manufacturing", "reit", "bank"}
+    saved, real, seen = os.environ.get("GEMINI_API_KEY"), extractor.extract, {}
+    os.environ["GEMINI_API_KEY"] = "test"
+
+    def fake_extract(*a, cogs=None, **k):
+        seen["cogs"] = cogs
+        return extractor.Extraction(by_nature(), "fake", {})
+
+    extractor.extract = fake_extract
+    try:
+        rules = {"companies": [{"match": "F13", "industry": "manufacturing", "cogs": "Materials and subcontracting only"}]}
+        r = client.post("/api/process?op=process", content_type="multipart/form-data", data={
+            "pdf": (io.BytesIO((HERE / "sample_results.pdf").read_bytes()), "fuyu.pdf"), "stock_code": "F13",
+            "issuer": "FU YU CORPORATION LIMITED", "cogs_rules": json.dumps(rules)})
+    finally:
+        extractor.extract = real
+        os.environ.pop("GEMINI_API_KEY", None)
+        if saved is not None:
+            os.environ["GEMINI_API_KEY"] = saved
+    assert r.status_code == 200 and seen["cogs"]["company"]["cogs"] == "Materials and subcontracting only"
+    assert r.json["meta"]["cogs_basis"]["rule"] == "your rule for F13" and r.json["meta"]["industry"] == "Manufacturing & industrials"
+    picks = [True, True, True, True, False]
+    r2 = client.post("/api/recompute?op=recompute", content_type="multipart/form-data", data={
+        "normalised": json.dumps(r.json["normalised"]), "meta": json.dumps(r.json["meta"]), "in_cogs": json.dumps(picks),
+        "workbook": (io.BytesIO(base64.b64decode(r.json["workbook_b64"])), "F13.xlsx")})
+    assert r2.status_code == 200 and r2.json["chosen"][-1] == "Employee benefits expense"
+    assert r2.json["normalised"]["income_statement"]["values"]["cost_of_sales"] == [-87_500, -81_300]
+    wb = load_workbook(io.BytesIO(base64.b64decode(r2.json["workbook_b64"])))
+    gp_row = next(r for r in wb["Income Statement"].iter_rows(values_only=True) if r[0] == "Gross Profit")
+    assert gp_row[1:3] == (33_012, 26_300) and checks.verdict(r2.json["normalised"])["ok"] == r2.json["verdict"]["ok"]
+    bad = client.post("/api/recompute?op=recompute", content_type="multipart/form-data",
+                      data={"normalised": json.dumps(r.json["normalised"]), "meta": "{}", "in_cogs": "[true]"})
+    assert bad.status_code == 400 and "Say in or out for each of the 5 lines" in bad.json["error"]
+
+
 def test_workbook_and_merge():
     meta = {"company_name": "ACME HOLDINGS LIMITED", "stock_code": "ACME", "currency": "SGD", "filing": "1H2026"}
     norm = extractor.normalise(FAKE)
@@ -1230,6 +1417,29 @@ def test_mcp_connector():
         text = call("submit_statements", {"extraction": thin})["content"][0]["text"]
         assert "Verdict: NOT VERIFIED: no tie-out check passes" in text and "Gross profit is blank" in text
         assert "No tie-out check passes" in text and "No balance sheet or cash flow statement was read" in text
+
+        # The industry and how COGS was made up come back line by line; the user's rule travels as cogs_rule.
+        tools = {t["name"]: t for t in rpc("tools/list").get_json()["result"]["tools"]}
+        assert all("cogs_rule" in tools[n]["inputSchema"]["properties"] for n in ("open_filing", "submit_statements", "extract_filing"))
+        nature = by_nature()
+        nature["format"] = "general"
+        for st in ("income_statement", "balance_sheet", "cash_flow"):
+            for i, p in enumerate(nature[st]["periods"], 1):
+                p["col"] = i
+            for row in nature[st]["rows"]:
+                row["cells"] = [{"col": i, "value": v} for i, v in enumerate(row.pop("values"), 1) if v is not None]
+        rule = {"match": "F13", "industry": "manufacturing", "cogs": "Materials and subcontracting only"}
+        text = call("submit_statements", {"extraction": nature, "stock_code": "F13", "filing": "1H2026", "cogs_rule": rule})["content"][0]["text"]
+        assert "Industry: Manufacturing & industrials (your rule for F13)" in text
+        assert "Cost of goods sold: judged (Manufacturing & industrials): Raw materials and consumables used + Changes" in text
+        assert "  - IN  Raw materials and consumables used: materials" in text and "  - out Employee benefits expense: mostly head office" in text
+        link = text.split("Excel workbook")[1].split(": ", 1)[1].split()[0]
+        u = urlparse(link)
+        cogs_sheet = load_workbook(io.BytesIO(client.get(f"{u.path}?{u.query}").data))["COGS Basis"]
+        assert any("by your rule for F13" in str(r[0].value) for r in cogs_sheet.iter_rows())
+        broken = copy.deepcopy(nature)
+        broken["cost_of_sales_basis"]["lines"][0]["cells"] = [{"col": 9, "value": 1}]
+        assert "income statement's columns" in call("submit_statements", {"extraction": broken})["content"][0]["text"]
 
         # A text filing read as images comes with its text layer, digits exact.
         current["pdf"] = HERE / "sample_results.pdf"

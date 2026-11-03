@@ -184,7 +184,10 @@ SKELETON = (
     'Return only one JSON object, no prose, shaped like:\n'
     '{"company_name": str, "format": "general|bank", "currency": "SGD", '
     '"unit": "units|thousands|lakhs|millions|crores|billions", "basis": "Group", '
-    '"notes": str, "income_statement": BLOCK, "balance_sheet": BLOCK, "cash_flow": BLOCK}\n'
+    '"industry": <industry id>, "industry_evidence": str, '
+    '"notes": str, "income_statement": BLOCK, "balance_sheet": BLOCK, "cash_flow": BLOCK, '
+    '"cost_of_sales_basis": {"method": "printed|by_nature|judged|none", "lines": [{"source_label": str, '
+    '"cells": [{"col": int, "value": number}], "in_cogs": bool, "why": str}], "explanation": str}}\n'
     'where BLOCK = {"page_numbers": [int], "periods": [{"col": int, "label": str, "period_end": "YYYY-MM-DD", '
     '"months": int}], "rows": [{"key": <template key>, "source_label": str, "cells": [{"col": int, "value": number}]}]}'
 )
@@ -375,4 +378,13 @@ def coerce(raw: dict, formats: dict | None = None) -> dict:
                              "values": [number(v) for v in vals]})
         nums = [n for n in block.get("page_numbers") or [] if isinstance(n, int)]
         out[st] = {"page_numbers": nums, "periods": periods, "rows": rows}
+    out["industry"] = str(raw.get("industry") or "").strip().lower()
+    out["industry_evidence"] = str(raw.get("industry_evidence") or "")
+    basis = raw.get("cost_of_sales_basis") if isinstance(raw.get("cost_of_sales_basis"), dict) else {}
+    out["cost_of_sales_basis"] = {
+        "method": str(basis.get("method") or "").strip().lower(), "explanation": str(basis.get("explanation") or ""),
+        "lines": [{"source_label": str(ln.get("source_label") or ""), "in_cogs": bool(ln.get("in_cogs")), "why": str(ln.get("why") or ""),
+                   "cells": [{"col": c["col"], "value": number(c.get("value"))} for c in ln.get("cells") or []
+                             if isinstance(c, dict) and isinstance(c.get("col"), int) and number(c.get("value")) is not None]}
+                  for ln in basis.get("lines") or [] if isinstance(ln, dict)]}
     return out

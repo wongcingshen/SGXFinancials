@@ -33,7 +33,7 @@ from urllib.parse import quote, urlencode
 
 import requests
 
-from . import checks, extractor, pictures
+from . import checks, extractor, industries, pictures
 from . import template as T
 from .page_scanner import page_texts
 from .pipeline import attachment_name, choose_financial_pdf, default_pages, not_results_reason, process_pdf
@@ -79,6 +79,10 @@ _META = {
     "stock_code": {"type": "string", "description": "SGX stock code, e.g. D05"},
     "filing": {"type": "string", "description": "Announcement title"},
 }
+_COGS_RULE = {"cogs_rule": {
+    "type": "object", "description": "The user's own cost of goods sold rule for this company, when the user gave one "
+                                     "(the web app puts it in its message): {match, industry, cogs}",
+    "properties": {"match": {"type": "string"}, "industry": {"type": "string"}, "cogs": {"type": "string"}}}}
 
 TOOLS = [
     {
@@ -110,6 +114,7 @@ TOOLS = [
                 "pages": {"type": "array", "items": {"type": "integer"},
                           "description": "1-based pages of the PDF to return as full-resolution images"},
                 "as_images": {"type": "boolean", "description": "Return images even when the statements are text"},
+                **_COGS_RULE,
             },
         },
         "annotations": {"readOnlyHint": True, "openWorldHint": True},
@@ -125,7 +130,7 @@ TOOLS = [
             "properties": {
                 "extraction": {"type": "object", "description": "company_name, format, currency, unit, basis, "
                                "income_statement, balance_sheet, cash_flow (each {page_numbers, periods, rows}), notes"},
-                **_URLS, **_META,
+                **_URLS, **_META, **_COGS_RULE,
                 "source_pdf": {"type": "string"},
                 "pages": {"type": "array", "items": {"type": "integer"}, "description": "PDF pages the figures came from"},
             },
@@ -140,7 +145,7 @@ TOOLS = [
                        "a filing and return the figures, checks and an Excel download link. Takes 1-3 minutes.",
         "inputSchema": {
             "type": "object",
-            "properties": {**_URLS, **_META,
+            "properties": {**_URLS, **_META, **_COGS_RULE,
                            "pages": {"type": "array", "items": {"type": "integer"}, "description": "Optional 1-based pages"}},
         },
         "annotations": {"readOnlyHint": True, "openWorldHint": True},
@@ -299,6 +304,17 @@ def load_filing(args: dict, ctx: Context):
     return picked[0], picked[1], picked[2], [n for _, n in links]
 
 
+def cogs_rules(args: dict, stock_code: str = "", company: str = "") -> dict:
+    """The industries and COGS rules for a call: the built-in ones, with the user's rule for the company
+    when the call carries one."""
+    rule = args.get("cogs_rule")
+    if isinstance(rule, dict) and (rule.get("cogs") or rule.get("industry")):
+        rules = industries.resolve({"companies": [{**rule, "match": rule.get("match") or stock_code or company or "this company"}]})
+        rules["company"] = rules["companies"][0]
+        return rules
+    return industries.for_filing(None, stock_code, company)
+
+
 def _pages_arg(args: dict, page_count: int) -> list[int]:
     pages = sorted({int(p) for p in args.get("pages") or [] if str(p).lstrip("-").isdigit()})
     bad = [p for p in pages if not 1 <= p <= page_count]
@@ -376,23 +392,27 @@ def open_tool(args: dict, ctx: Context) -> dict:
                   "contrast stretched). Read them yourself following the rules below, then call submit_statements with "
                   f"extraction=<the JSON>, plus announcement_url, source_pdf={json.dumps(pdf.name)}, pages={chosen}"
                   " and the company_name / stock_code if you know them.",
-              "", reading_rules(), "", f"Source for submit_statements: {json.dumps({**source, 'pages': chosen})}"]
+              "", reading_rules(cogs=cogs_rules(args)), "", f"Source for submit_statements: {json.dumps({**source, 'pages': chosen})}"]
     return _text("\n".join(lines), extra=extra)
 
 
-def reading_rules(formats: dict | None = None) -> str:
+def reading_rules(formats: dict | None = None, cogs: dict | None = None) -> str:
     """The same rules and template the server's own AI gets, plus the JSON shape to submit."""
     shape = {
-        "company_name": "…", "format": "general | bank", "currency": "SGD", "unit": "thousands",
-        "basis": "Group (consolidated)",
+        "company_name": "…", "format": "general | bank", "industry": "manufacturing",
+        "industry_evidence": "sale of precision parts; raw materials and consumables used",
+        "currency": "SGD", "unit": "thousands", "basis": "Group (consolidated)",
         "income_statement": {"page_numbers": [7], "periods": [
             {"col": 1, "label": "3 months ended 30.09.2026", "period_end": "2026-09-30", "months": 3}],
             "rows": [{"key": "revenue", "source_label": "Revenue", "cells": [{"col": 1, "value": 12345}]}]},
         "balance_sheet": {"page_numbers": [8], "periods": ["… months 0 …"], "rows": ["…"]},
         "cash_flow": {"page_numbers": [9], "periods": ["…"], "rows": ["…"]},
+        "cost_of_sales_basis": {"method": "printed | by_nature | judged | none", "lines": [
+            {"source_label": "Raw materials and consumables used", "cells": [{"col": 1, "value": -4567}],
+             "in_cogs": True, "why": "materials"}], "explanation": "what the COGS is made of and what was left out"},
         "notes": "caveats, unreadable figures",
     }
-    rules = extractor.build_system(formats).replace(
+    rules = extractor.build_system(formats, cogs).replace(
         "- `page_numbers` are the page numbers within the attached excerpt (1-based) the statement came from.",
         "- `page_numbers` are the PDF page numbers (as labelled above the images) the statement came from.")
     return ("TRANSCRIPTION RULES\n" + rules + "\n\nSubmit exactly this JSON shape (keys from the chosen format only; "
@@ -408,6 +428,22 @@ def _validate(data: dict, formats: dict) -> list[str]:
     fmt = data.get("format") if data.get("format") in formats else "general"
     if data.get("unit") and data["unit"] not in extractor.UNIT_FACTORS:
         problems.append(f"unit must be one of {list(extractor.UNIT_FACTORS)}")
+    if data.get("industry") and data["industry"] not in industries.ids():
+        problems.append(f"industry must be one of {industries.ids()}")
+    basis = data.get("cost_of_sales_basis")
+    if basis is not None:
+        cols = {p.get("col") for p in (data.get("income_statement") or {}).get("periods") or [] if isinstance(p, dict)}
+        if not isinstance(basis, dict) or not isinstance(basis.get("lines", []), list):
+            problems.append("cost_of_sales_basis must be {method, lines: [...], explanation}")
+        else:
+            for ln in basis.get("lines") or []:
+                if not isinstance(ln, dict) or "source_label" not in ln:
+                    problems.append("cost_of_sales_basis lines need source_label, cells, in_cogs and why")
+                    continue
+                for c in ln.get("cells") or []:
+                    if not isinstance(c, dict) or c.get("col") not in cols or not isinstance(c.get("value"), (int, float)):
+                        problems.append(f"cost_of_sales_basis/{ln['source_label']}: cell {c} must be "
+                                        f"{{col: one of the income statement's columns {sorted(cols)}, value: number}}")
     for st in T.STATEMENT_IDS:
         block = data.get(st)
         if block is None:
@@ -455,9 +491,10 @@ def _sign(payload: str) -> str:
 
 def download_link(ctx: Context, normalised: dict, meta: dict) -> str:
     """A link that rebuilds the workbook when opened: the figures travel in the link itself."""
-    small = {st: {k: b[k] for k in ("periods", "values", "labels", "format", "step") if k in b} for st, b in normalised.items()}
+    small = {st: {k: b[k] for k in ("periods", "values", "labels", "format", "step", "cogs_basis") if k in b}
+             for st, b in normalised.items()}
     keep = ("company_name", "stock_code", "filing", "announcement_url", "currency", "unit", "basis", "format",
-            "notes", "source_pdf", "pages", "model", "verdict", "presentation")
+            "notes", "source_pdf", "pages", "model", "verdict", "presentation", "industry")
     raw = json.dumps({"n": small, "m": {k: meta.get(k) for k in keep if meta.get(k)}}, separators=(",", ":"))
     d = base64.urlsafe_b64encode(zlib.compress(raw.encode(), 9)).decode().rstrip("=")
     return f"{ctx.base_url}/api/download?" + urlencode({"op": "download", "d": d, "s": _sign(d)})
@@ -478,6 +515,14 @@ def results_text(ctx: Context, normalised: dict, meta: dict, formats: dict, head
     summary = run_checks(merge_records([], normalised, meta))
     counts = {s: sum(c["status"] == s for c in summary) for s in ("PASS", "FAIL", "derived", "n/a")}
     link = download_link(ctx, normalised, meta)
+    basis = (normalised.get("income_statement") or {}).get("cogs_basis") or {}
+    if basis:
+        header = [*header, f"Industry: {basis.get('industry_name')}" + (f" ({basis['evidence']})" if basis.get("evidence") else ""),
+                  "Cost of goods sold: " + (basis.get("cogs_label") or "blank") + (f". {basis['explanation']}" if basis.get("explanation") else "")
+                  + "".join(f"\n  - {'IN ' if ln['in_cogs'] else 'out'} {ln['label']}" + (f": {ln['why']}" if ln.get("why") else "")
+                            for ln in basis.get("lines") or [])]
+        if basis.get("also_suggests"):
+            header.append(f"The filing's lines also suggest: {basis['also_suggests']}; check the industry.")
     lines = [*header, f"Checks: {counts['PASS']} pass, {counts['FAIL']} fail, {counts['derived']} derived, {counts['n/a']} n/a.",
              "Verdict: " + ("OK, the figures are confirmed by their printed totals." if verdict["ok"] else
                             "NOT VERIFIED: " + "; ".join(verdict["reasons"]) + ". Don't present these figures as "
@@ -518,7 +563,8 @@ def submit_tool(args: dict, ctx: Context) -> dict:
     problems = _validate(data, formats)
     if problems:
         raise ToolError("Fix these and submit again:\n- " + "\n- ".join(problems[:30]))
-    normalised = extractor.normalise(data, formats)
+    normalised = extractor.normalise(data, formats, cogs_rules(args, args.get("stock_code", ""),
+                                                               args.get("company_name") or data.get("company_name", "")))
     pages = args.get("pages") or []
     meta = {
         "company_name": args.get("company_name") or data.get("company_name", ""),
@@ -531,6 +577,8 @@ def submit_tool(args: dict, ctx: Context) -> dict:
         "model": "Claude (via MCP connector)", "vision": True,
     }
     meta["verdict"] = checks.verdict(normalised)
+    meta["cogs_basis"] = normalised["income_statement"].get("cogs_basis")
+    meta["industry"] = (meta["cogs_basis"] or {}).get("industry_name", "")
     head = [f"{meta['company_name'] or 'Filing'} — {meta['format']} format, {meta['currency']} "
             f"(read in {meta['unit'] or extractor.DEFAULT_UNIT}, shown in '000), basis: {meta['basis'] or '?'}"]
     return results_text(ctx, normalised, meta, formats, head)
@@ -550,8 +598,8 @@ def extract_tool(args: dict, ctx: Context) -> dict:
                         "as_images=true and read the statements yourself, then submit_statements.")
     meta = {"company_name": args.get("company_name", ""), "stock_code": args.get("stock_code", ""),
             "filing": args.get("filing", ""), "announcement_url": args.get("announcement_url") or used_url}
-    res = process_pdf(pdf, scan=scan, pages=pages, meta=meta, cache_dir=ctx.work,
-                      deadline=started + 280, formats=T.BUILTIN)
+    res = process_pdf(pdf, scan=scan, pages=pages, meta=meta, cache_dir=ctx.work, deadline=started + 280,
+                      formats=T.BUILTIN, cogs=cogs_rules(args, meta["stock_code"], meta["company_name"]))
     if not res.normalised:
         raise ToolError("No statement pages found; call open_filing to look at the pages and pass pages=[...].")
     head = _scan_summary(pdf, scan, used_url, names) + [
