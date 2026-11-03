@@ -521,6 +521,10 @@ def results_text(ctx: Context, normalised: dict, meta: dict, formats: dict, head
                   "Cost of goods sold: " + (basis.get("cogs_label") or "blank") + (f". {basis['explanation']}" if basis.get("explanation") else "")
                   + "".join(f"\n  - {'IN ' if ln['in_cogs'] else 'out'} {ln['label']}" + (f": {ln['why']}" if ln.get("why") else "")
                             for ln in basis.get("lines") or [])]
+        if basis.get("da_in_cogs"):
+            show = lambda vals: ", ".join("—" if v is None else f"{v:,.0f}" for v in vals)  # noqa: E731
+            header.append(f"Of which depreciation & amortisation ('000, by period): {show(basis['da_in_cogs'])}; "
+                          f"cost of goods sold excluding D&A: {show(basis['cogs_excl_da'])} (FactSet shows both).")
         if basis.get("also_suggests"):
             header.append(f"The filing's lines also suggest: {basis['also_suggests']}; check the industry.")
     lines = [*header, f"Checks: {counts['PASS']} pass, {counts['FAIL']} fail, {counts['derived']} derived, {counts['n/a']} n/a.",

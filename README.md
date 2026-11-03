@@ -155,6 +155,17 @@ it is taken as printed. When not, the cost of goods sold (COGS, the gross expens
    explanation, every line with its figures, in or out and why, and the total. The Source Map names
    the lines ("judged (Manufacturing & industrials): Raw materials… + Subcontract costs").
 
+**FactSet's convention for depreciation.** The FactSet Fundamentals feed used in
+[EDGARtoCSV](https://github.com/wongcingshen/EDGARtoCSV) (`FF_GEN_ANN_US`, 26,512 companies) puts
+depreciation & amortisation inside cost of revenue ("COGS including D&A", in 99.9% of rows) and also
+shows D&A on its own; EBIT = revenue − COGS incl. D&A − SG&A − other operating expenses, and EBITDA =
+EBIT + D&A. The industrial rules here follow it: D&A on the face of the statement goes into the judged
+COGS, and the COGS Basis shows "of which D&A" and COGS excluding D&A, so both of FactSet's figures are
+there and gross profit compares with FactSet's gross income. A printed cost of sales stays as printed
+(the D&A inside it isn't shown on the face). FactSet gives banks and most other companies without a
+cost of sales no cost of revenue at all; here they still get one (banks, finance companies and insurers
+their gross expense, REITs their property expenses), so gross profit is never blank.
+
 When nothing on the statement is a cost of earning the revenue (an investment holding company's
 dividends), COGS is 0 and gross profit equals revenue, and the sheet says so. Readings without line
 marks fall back to the program's sums (expenses by nature: raw materials + employee benefits +

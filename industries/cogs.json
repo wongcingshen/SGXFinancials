@@ -1,123 +1,291 @@
 {
- "about": "Industries and how each one's cost of goods sold (COGS) is made up when a filing prints no cost of sales. The AI names the company's industry from this list and marks which expense lines are COGS by the industry's rule; the program adds them up. Edit in the web app (Settings > Cost of goods sold) or here to change the default for everyone.",
+ "about": "Industries and how each one's cost of goods sold (COGS) is made up when a filing prints no cost of sales. The AI names the company's industry from this list and marks which expense lines are COGS by the industry's rule; the program adds them up. Depreciation and amortisation follow FactSet's convention (cost of revenue including D&A, with D&A also shown on its own), so gross profit compares with FactSet's gross income; banks, finance, insurance and REITs keep their own gross expense. Edit in the web app (Settings > Cost of goods sold) or here to change the default for everyone.",
  "industries": [
   {
    "id": "manufacturing",
    "name": "Manufacturing & industrials",
    "applies_to": "Makes and sells products: factories, precision engineering, electronics, chemicals, packaging, building materials, equipment",
-   "keywords": ["raw materials", "consumables used", "work in progress", "finished goods", "manufactur", "production", "factory", "precision", "engineering products"],
-   "cogs": "Raw materials and consumables used + purchases + changes in inventories of finished goods and work in progress + subcontract and processing costs + production overheads shown as such (factory, freight-in, utilities). Materials always go in. Expenses presented by nature: employee benefits and depreciation and amortisation go in too. Leave out selling and distribution, administrative, research, other operating and finance costs."
+   "keywords": [
+    "raw materials",
+    "consumables used",
+    "work in progress",
+    "finished goods",
+    "manufactur",
+    "production",
+    "factory",
+    "precision",
+    "engineering products"
+   ],
+   "cogs": "Raw materials and consumables used + purchases + changes in inventories of finished goods and work in progress + subcontract and processing costs + production overheads shown as such (factory, freight-in, utilities). Materials always go in. Expenses presented by nature: employee benefits go in too. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out selling and distribution, administrative, research, other operating and finance costs."
   },
   {
    "id": "trading",
    "name": "Trading, distribution & retail",
    "applies_to": "Buys goods and sells them on: trading, wholesale distribution, retail stores, e-commerce, commodity trading",
-   "keywords": ["purchases", "goods for resale", "merchandise", "trading", "distribution", "retail", "stores", "inventories sold"],
-   "cogs": "Cost of goods sold: purchases of goods + changes in inventories (inventories consumed or sold) + freight, duties and other costs of bringing goods in. Materials and goods always go in. Leave out store staff, rental, selling, administrative and finance costs."
+   "keywords": [
+    "purchases",
+    "goods for resale",
+    "merchandise",
+    "trading",
+    "distribution",
+    "retail",
+    "stores",
+    "inventories sold"
+   ],
+   "cogs": "Cost of goods sold: purchases of goods + changes in inventories (inventories consumed or sold) + freight, duties and other costs of bringing goods in. Materials and goods always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out store staff, rental, selling, administrative and finance costs."
   },
   {
    "id": "food_beverage",
    "name": "Food & beverage",
    "applies_to": "Restaurants, food courts, catering, bakeries and food and beverage outlets",
-   "keywords": ["food and beverage", "food & beverage", "restaurant", "outlets", "catering", "f&b", "kitchen"],
-   "cogs": "Cost of food and beverages: raw materials, ingredients and consumables used + purchases + changes in inventories, and kitchen or outlet staff costs only when the statement puts them in cost of sales. Materials always go in. Leave out rental, utilities, general staff, administrative and finance costs."
+   "keywords": [
+    "food and beverage",
+    "food & beverage",
+    "restaurant",
+    "outlets",
+    "catering",
+    "f&b",
+    "kitchen"
+   ],
+   "cogs": "Cost of food and beverages: raw materials, ingredients and consumables used + purchases + changes in inventories, and kitchen or outlet staff costs only when the statement puts them in cost of sales. Materials always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out rental, utilities, general staff, administrative and finance costs."
   },
   {
    "id": "property",
    "name": "Property development & investment",
    "applies_to": "Develops and sells properties, or owns and leases them (not a REIT)",
-   "keywords": ["development properties", "properties held for sale", "sale of development", "property development", "investment properties", "rental income", "land", "properties"],
-   "cogs": "Cost of properties sold (land, construction and development costs recognised) + direct operating expenses of investment properties (property tax, maintenance, property management, utilities) + cost of other operations shown in cost of sales. Construction materials always go in. Leave out marketing, administrative and finance costs and fair value changes."
+   "keywords": [
+    "development properties",
+    "properties held for sale",
+    "sale of development",
+    "property development",
+    "investment properties",
+    "rental income",
+    "land",
+    "properties"
+   ],
+   "cogs": "Cost of properties sold (land, construction and development costs recognised) + direct operating expenses of investment properties (property tax, maintenance, property management, utilities) + cost of other operations shown in cost of sales. Construction materials always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out marketing, administrative and finance costs and fair value changes."
   },
   {
    "id": "reit",
    "name": "REITs & business trusts",
    "applies_to": "Real estate investment trusts and property or infrastructure business trusts: gross revenue, property expenses, net property income, distributions to unitholders",
-   "keywords": ["net property income", "unitholders", "distribution to unitholders", "property expenses", "property operating expenses", "reit", "trust", "trustee", "manager's management fee"],
+   "keywords": [
+    "net property income",
+    "unitholders",
+    "distribution to unitholders",
+    "property expenses",
+    "property operating expenses",
+    "reit",
+    "trust",
+    "trustee",
+    "manager's management fee"
+   ],
    "cogs": "Property operating expenses: property tax, maintenance and repairs, utilities, property management fees, leasing and marketing at the properties, and other direct property costs, so that gross profit is the net property income. Leave out the REIT manager's management fees, trustee fees, other trust expenses, finance costs and fair value changes."
   },
   {
    "id": "construction",
    "name": "Construction & engineering services",
    "applies_to": "Builds for others: construction, civil and building contractors, engineering, procurement and installation",
-   "keywords": ["contract revenue", "contract costs", "construction", "subcontract", "contract assets", "contract work", "builder"],
-   "cogs": "Contract costs: materials + subcontractor costs + direct labour + site overheads + depreciation of equipment used on contracts. Materials always go in. Leave out administrative, tendering, other operating and finance costs."
+   "keywords": [
+    "contract revenue",
+    "contract costs",
+    "construction",
+    "subcontract",
+    "contract assets",
+    "contract work",
+    "builder"
+   ],
+   "cogs": "Contract costs: materials + subcontractor costs + direct labour + site overheads. Materials always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out administrative, tendering, other operating and finance costs."
   },
   {
    "id": "transport",
    "name": "Shipping, logistics & transport",
    "applies_to": "Shipping, offshore and marine services, airlines, logistics, ports, buses, taxis and rail",
-   "keywords": ["vessel", "voyage", "charter", "bunker", "freight", "aircraft", "airline", "shipping", "logistics", "port", "marine", "fleet", "fuel"],
-   "cogs": "Costs of operating the fleet and services: fuel and bunkers, port, airport and handling charges, charter hire and leases of vessels, aircraft or vehicles, maintenance and repairs, crew and other operating staff, inflight, cargo and other direct service costs, and depreciation of vessels, aircraft and vehicles. Consumables always go in. Leave out administrative, selling and finance costs."
+   "keywords": [
+    "vessel",
+    "voyage",
+    "charter",
+    "bunker",
+    "freight",
+    "aircraft",
+    "airline",
+    "shipping",
+    "logistics",
+    "port",
+    "marine",
+    "fleet",
+    "fuel"
+   ],
+   "cogs": "Costs of operating the fleet and services: fuel and bunkers, port, airport and handling charges, charter hire and leases of vessels, aircraft or vehicles, maintenance and repairs, crew and other operating staff, inflight, cargo and other direct service costs. Consumables always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out administrative, selling and finance costs."
   },
   {
    "id": "hospitality",
    "name": "Hotels, leisure & gaming",
    "applies_to": "Hotels, serviced residences, resorts, attractions, cinemas, clubs and casinos",
-   "keywords": ["hotel", "room revenue", "rooms", "gaming", "casino", "resort", "attractions", "hospitality", "serviced residence"],
-   "cogs": "Cost of food, beverages and other goods sold + direct operating costs of rooms, attractions and gaming (direct staff, supplies, gaming taxes and levies) + property operating costs of the hotels and resorts. Supplies always go in. Leave out administrative, sales and marketing and finance costs."
+   "keywords": [
+    "hotel",
+    "room revenue",
+    "rooms",
+    "gaming",
+    "casino",
+    "resort",
+    "attractions",
+    "hospitality",
+    "serviced residence"
+   ],
+   "cogs": "Cost of food, beverages and other goods sold + direct operating costs of rooms, attractions and gaming (direct staff, supplies, gaming taxes and levies) + property operating costs of the hotels and resorts. Supplies always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out administrative, sales and marketing and finance costs."
   },
   {
    "id": "energy",
    "name": "Energy & utilities",
    "applies_to": "Power generation, gas, water and waste, oil and gas production and services, renewables",
-   "keywords": ["electricity", "power", "gas", "oil", "utilities", "energy", "fuel costs", "water", "renewable", "generation"],
-   "cogs": "Fuel, gas and purchased power or water + transmission and distribution costs + operation and maintenance of plants and fields + depreciation of generating and production assets when shown as cost of sales. Fuel and materials always go in. Leave out administrative and finance costs."
+   "keywords": [
+    "electricity",
+    "power",
+    "gas",
+    "oil",
+    "utilities",
+    "energy",
+    "fuel costs",
+    "water",
+    "renewable",
+    "generation"
+   ],
+   "cogs": "Fuel, gas and purchased power or water + transmission and distribution costs + operation and maintenance of plants and fields. Fuel and materials always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out administrative and finance costs."
   },
   {
    "id": "resources",
    "name": "Mining, plantations & commodities",
    "applies_to": "Mining and quarrying, palm oil and other plantations, agribusiness and commodity processing",
-   "keywords": ["mining", "mine", "plantation", "palm", "coal", "gold", "harvest", "commodit", "crude palm oil", "fresh fruit bunches", "agri"],
-   "cogs": "Production costs: mining, harvesting and processing costs + raw materials and commodities purchased + changes in inventories + royalties + plantation upkeep + depreciation and amortisation of mine and plantation assets. Materials always go in. Leave out selling (freight-out), administrative and finance costs."
+   "keywords": [
+    "mining",
+    "mine",
+    "plantation",
+    "palm",
+    "coal",
+    "gold",
+    "harvest",
+    "commodit",
+    "crude palm oil",
+    "fresh fruit bunches",
+    "agri"
+   ],
+   "cogs": "Production costs: mining, harvesting and processing costs + raw materials and commodities purchased + changes in inventories + royalties + plantation upkeep. Materials always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out selling (freight-out), administrative and finance costs."
   },
   {
    "id": "technology",
    "name": "Technology, telecoms & media",
    "applies_to": "Telecommunications, software, IT services, data centres, electronics distribution, media and advertising",
-   "keywords": ["telecommunication", "software", "interconnect", "network", "subscriber", "technology", "data centre", "media", "advertising", "licence", "it services"],
-   "cogs": "Cost of sales and services: equipment and devices sold, interconnect and network costs, content and licence costs, hosting and data-centre costs, direct delivery staff, and depreciation of network assets when shown as cost of services. Equipment and materials always go in. Leave out research and development, selling, administrative and finance costs."
+   "keywords": [
+    "telecommunication",
+    "software",
+    "interconnect",
+    "network",
+    "subscriber",
+    "technology",
+    "data centre",
+    "media",
+    "advertising",
+    "licence",
+    "it services"
+   ],
+   "cogs": "Cost of sales and services: equipment and devices sold, interconnect and network costs, content and licence costs, hosting and data-centre costs, direct delivery staff. Equipment and materials always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out research and development, selling, administrative and finance costs."
   },
   {
    "id": "healthcare",
    "name": "Healthcare & pharmaceuticals",
    "applies_to": "Hospitals, clinics, dental and medical services, laboratories, pharmaceuticals and medical devices",
-   "keywords": ["medical", "clinic", "hospital", "patient", "pharma", "healthcare", "laboratory", "dental", "drugs"],
-   "cogs": "Medical supplies, drugs and consumables used + changes in inventories + doctors' and clinical staff costs and professional fees for services rendered when shown as cost of services. Supplies always go in. Leave out administrative, marketing and finance costs."
+   "keywords": [
+    "medical",
+    "clinic",
+    "hospital",
+    "patient",
+    "pharma",
+    "healthcare",
+    "laboratory",
+    "dental",
+    "drugs"
+   ],
+   "cogs": "Medical supplies, drugs and consumables used + changes in inventories + doctors' and clinical staff costs and professional fees for services rendered when shown as cost of services. Supplies always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out administrative, marketing and finance costs."
   },
   {
    "id": "services",
    "name": "Business & consumer services",
    "applies_to": "Professional, education, security, cleaning, staffing, facilities management, consultancy and other services",
-   "keywords": ["services rendered", "cost of services", "manpower", "outsourc", "consultancy", "education", "tuition", "security services", "cleaning", "facilities management"],
-   "cogs": "Cost of services: direct staff costs of delivering the services + subcontractor and outsourcing costs + materials and consumables used in delivering them + other direct project costs. Materials always go in. Leave out administrative, selling and finance costs."
+   "keywords": [
+    "services rendered",
+    "cost of services",
+    "manpower",
+    "outsourc",
+    "consultancy",
+    "education",
+    "tuition",
+    "security services",
+    "cleaning",
+    "facilities management"
+   ],
+   "cogs": "Cost of services: direct staff costs of delivering the services + subcontractor and outsourcing costs + materials and consumables used in delivering them + other direct project costs. Materials always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out administrative, selling and finance costs."
   },
   {
    "id": "bank",
    "name": "Banks",
    "applies_to": "Banks: interest earned and expended, deposits, loans and advances",
-   "keywords": ["interest earned", "interest expended", "deposits", "advances", "net interest income", "loans and advances", "bank"],
+   "keywords": [
+    "interest earned",
+    "interest expended",
+    "deposits",
+    "advances",
+    "net interest income",
+    "loans and advances",
+    "bank"
+   ],
    "cogs": "Gross expense: financial cost associated with financial income (interest expense) + provision for credit losses (allowances) + insurance service expenses, if any + operating costs. Leave out tax and exceptional items."
   },
   {
    "id": "finance",
    "name": "Finance, leasing & securities",
    "applies_to": "Finance companies, leasing, factoring, consumer credit, pawnbroking loans, securities brokers and fund managers",
-   "keywords": ["financial cost associated with financial income", "credit losses", "hire purchase", "factoring", "leasing", "consumer loans", "brokerage", "finance income from", "loans to customers", "securities"],
+   "keywords": [
+    "financial cost associated with financial income",
+    "credit losses",
+    "hire purchase",
+    "factoring",
+    "leasing",
+    "consumer loans",
+    "brokerage",
+    "finance income from",
+    "loans to customers",
+    "securities"
+   ],
    "cogs": "Gross expense: financial cost associated with financial income (interest on the funds lent out) + provision for credit losses + commission and brokerage paid + insurance service expenses, if any + operating costs. Leave out tax and exceptional items."
   },
   {
    "id": "insurance",
    "name": "Insurance",
    "applies_to": "Insurers and reinsurers: insurance revenue, insurance service expenses, reinsurance",
-   "keywords": ["insurance revenue", "insurance service", "reinsurance", "gross written premium", "claims", "underwriting", "insurance"],
+   "keywords": [
+    "insurance revenue",
+    "insurance service",
+    "reinsurance",
+    "gross written premium",
+    "claims",
+    "underwriting",
+    "insurance"
+   ],
    "cogs": "Gross expense: insurance service expenses (claims and acquisition costs) + net expense from reinsurance contracts held + insurance finance expenses + operating costs. Leave out tax and exceptional items."
   },
   {
    "id": "investment_holding",
    "name": "Investment holding",
    "applies_to": "Holds investments and earns mainly dividends, interest and investment gains; fund vehicles and holding companies",
-   "keywords": ["dividend income", "investment income", "fair value gain", "investment holding", "gain on disposal of investments", "net investment income"],
+   "keywords": [
+    "dividend income",
+    "investment income",
+    "fair value gain",
+    "investment holding",
+    "gain on disposal of investments",
+    "net investment income"
+   ],
    "cogs": "Only direct costs of the investment income: cost of investments sold when revenue includes their proceeds, and fees paid to manage the investments. Often nothing qualifies: then mark no line and gross profit equals revenue. Leave out administrative and finance costs."
   },
   {
@@ -125,7 +293,7 @@
    "name": "Other",
    "applies_to": "Anything that fits none of the above",
    "keywords": [],
-   "cogs": "The direct costs of earning the revenue: materials, goods and consumables, direct labour and subcontractors, and direct operating costs. Materials always go in. Leave out selling, administrative and finance costs."
+   "cogs": "The direct costs of earning the revenue: materials, goods and consumables, direct labour and subcontractors, and direct operating costs. Materials always go in. Depreciation and amortisation on the face of the statement go in too, as in FactSet's COGS including D&A. Leave out selling, administrative and finance costs."
   }
  ]
 }

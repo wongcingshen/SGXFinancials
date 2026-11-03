@@ -5,6 +5,8 @@ revenue). When the income statement has no cost of sales line, it lists the expe
 face and marks which are COGS by that industry's rule; the program adds the marked lines up and
 keeps the list, each line with its figures and why it is in or out, so the workbook shows how the
 COGS was made up. The industry is cross-checked against the filing's own words (`guess`).
+Depreciation and amortisation follow FactSet's convention (cost of revenue including D&A, with D&A
+also shown on its own), as its Fundamentals feed does in the EDGARtoCSV repository.
 
 Built-in rules live in industries/cogs.json. In the web app (Settings > Cost of goods sold) a user
 can change an industry's rule, add industries, and give a company its own industry and rule. Those
