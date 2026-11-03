@@ -1,7 +1,7 @@
-"""Output layouts ("formats"), modelled on the ShareInvestor.com Financials pages.
+"""Output layouts ("formats"), modelled on standard financial-data provider layouts.
 
 A format is data, not code: formats/*.json are the built-in ones (General, Bank), and formats
-imported from a ShareInvestor export in the web app (or passed to the API) replace a built-in
+imported from a spreadsheet export in the web app (or passed to the API) replace a built-in
 with the same id or add a new one (e.g. REIT, Insurance). The AI chooses the format for each
 filing from their `applies_to` descriptions, and the workbook is written in that format's rows.
 
@@ -13,7 +13,7 @@ Format file
 Row fields
   key    stable id (do not rename once you have saved workbooks). Rows imported without a key get
          the built-in key of the same meaning ("Cost of Sales" -> cost_of_sales), else one made
-         from the label, so derived lines and tie-out checks keep working on ShareInvestor labels.
+         from the label, so derived lines and tie-out checks keep working on imported labels.
   label  text written in column A of the Excel sheet
   kind   "header" (section title, no numbers), "item" (a reported line) or "total" (bold subtotal)
   hint   synonyms / guidance passed to the AI to map the company's own wording
@@ -33,7 +33,7 @@ STATEMENT_TITLES = {"income_statement": "Income Statement", "balance_sheet": "Ba
 FORMATS_DIR = Path(__file__).resolve().parent.parent / "formats"
 KINDS = ("header", "item", "total")
 
-# Units used in the workbook. ShareInvestor shows figures in thousands of the
+# Units used in the workbook. Figures are shown in thousands of the
 # reporting currency; EPS stays in cents whatever this is set to.
 OUTPUT_UNIT = 1_000
 OUTPUT_UNIT_LABEL = "'000"
@@ -67,7 +67,7 @@ def normalise_label(label: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-# Other ways ShareInvestor and filings name the lines that derived figures and checks rely on.
+# Other ways data providers and filings name the lines that derived figures and checks rely on.
 SYNONYMS = {
     "income_statement": {
         "revenue": ["turnover", "sales", "total revenue", "revenue"],

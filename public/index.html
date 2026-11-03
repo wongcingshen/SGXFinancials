@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SGX Financials</title>
-<meta name="description" content="Screen SGX financial results announcements and turn the three statements into a ShareInvestor-style Excel workbook.">
+<meta name="description" content="Screen SGX financial results announcements and turn the three statements into a standard-layout Excel workbook.">
 <meta name="theme-color" content="#FAF9F5">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 34 34'%3E%3Crect width='34' height='34' rx='10' fill='%23F2784B'/%3E%3Crect x='8' y='19' width='4' height='7' rx='1.2' fill='%23141413'/%3E%3Crect x='14' y='15' width='4' height='11' rx='1.2' fill='%23141413'/%3E%3Ccircle cx='24' cy='11' r='4.4' fill='%23FFD66B' stroke='%23141413' stroke-width='1.8'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -236,10 +236,10 @@
         <button type="button" class="link-btn" id="wbClear" hidden style="align-self:flex-start;color:var(--color-ember-deep)">Don’t merge</button>
       </div>
       <div class="form-row">
-        <span class="lbl">Statement formats (ShareInvestor layout)</span>
+        <span class="lbl">Statement formats</span>
         <div class="fmt-list" id="fmtList"></div>
         <button type="button" class="btn btn-outline" id="fmtAdd" style="align-self:flex-start"><svg class="i"><use href="#i-plus"/></svg>Add a format</button>
-        <p class="help">Each filing is written in the format that fits the company. Import yours from a ShareInvestor export to match it exactly, and add your own entries or formulas. Saved in this browser.</p>
+        <p class="help">Each filing is written in the format that fits the company. Import yours from a spreadsheet export to match it exactly, and add your own entries or formulas. Saved in this browser.</p>
       </div>
       <div class="form-row" id="cogsSection">
         <span class="lbl">Cost of goods sold (COGS)</span>
@@ -316,11 +316,11 @@
       <div class="form-row" id="fmtDescRow" hidden><label for="fmtDesc">Which companies</label>
         <input class="input" id="fmtDesc" placeholder="e.g. Shipping trusts reporting charter income"></div>
       <div class="form-row">
-        <span class="lbl">Start from ShareInvestor</span>
+        <span class="lbl">Start from an export</span>
         <div class="drop" id="fmtDrop">
           <span class="sun-circle"><svg class="i"><use href="#i-upload"/></svg></span>
-          <span><span class="fname" id="fmtFileName">Choose or drop an Excel / CSV export</span><br><span class="muted" style="font-size:13px">Or paste rows copied from ShareInvestor’s Financials page below and press Read.</span></span>
-          <input type="file" id="fmtFile" accept=".xlsx,.xlsm,.csv,.txt" aria-label="ShareInvestor export">
+          <span><span class="fname" id="fmtFileName">Choose or drop an Excel / CSV export</span><br><span class="muted" style="font-size:13px">Or paste rows copied from a financial statements table below and press Read.</span></span>
+          <input type="file" id="fmtFile" accept=".xlsx,.xlsm,.csv,.txt" aria-label="Spreadsheet export">
         </div>
       </div>
       <div class="form-row">

@@ -1,4 +1,4 @@
-"""Write / merge extracted statements into a ShareInvestor-style workbook (one per company).
+"""Write / merge extracted statements into a standard-layout workbook (one per company).
 
 Sheets: Income Statement, Balance Sheet, Cash Flow (row labels down column A,
 one column per period), Checks (each filing's verdict, then the arithmetic

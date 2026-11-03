@@ -142,7 +142,7 @@ function renderIntro() {
       <ol class="steps">
         <li><span class="badge">1</span><span><strong>Screen</strong> <span class="muted">— opens every title and lists its PDFs.</span></span></li>
         <li><span class="badge">2</span><span><strong>Extract</strong> <span class="muted">— a keyword scan finds the three statements; ${esc(state.ai)} reads only those pages.</span></span></li>
-        <li><span class="badge">3</span><span><strong>Excel</strong> <span class="muted">— a ShareInvestor-style workbook with tie-out checks.</span></span></li>
+        <li><span class="badge">3</span><span><strong>Excel</strong> <span class="muted">— a standard-layout workbook with tie-out checks.</span></span></li>
       </ol>
     </div>`;
   renderBulk();
@@ -901,7 +901,7 @@ function clearMerge() {
 $("#wbClear").addEventListener("click", clearMerge);
 
 // ------------------------------------------------------------------ statement formats
-// Built-in formats come from the server (formats/*.json). Formats imported from ShareInvestor or
+// Built-in formats come from the server (formats/*.json). Formats imported from a spreadsheet or
 // edited here are kept in this browser and sent with every extraction; one with a built-in's id
 // replaces it.
 const FORMAT_USES = {
