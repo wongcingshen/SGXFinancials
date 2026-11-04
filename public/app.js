@@ -67,6 +67,9 @@ function toast(msg) {
   setTimeout(() => t.remove(), 3200);
 }
 
+// Tells the guided tour (tour.js) that something it waits for has happened.
+const tourSignal = (name) => document.dispatchEvent(new CustomEvent("sgxf:tour", { detail: name }));
+
 async function api(path, opts = {}) {
   const headers = { "X-App-Password": store.get("sgxf-pw"), ...(opts.headers || {}) };
   const ctrl = new AbortController();
@@ -137,6 +140,7 @@ function renderIntro() {
       <div>
         <h3 style="margin-top:0">Pick the dates and screen SGX</h3>
         <p>The dates start on the last results days: Friday to Sunday over a weekend, otherwise yesterday. Leave the company blank to see every financial statements announcement.</p>
+        <p style="margin-bottom:0">New here? <button type="button" class="link-btn" data-tour-start>Take the tour</button> <span class="muted">— about three minutes, on the real page.</span></p>
       </div>
       <ol class="steps">
         <li><span class="badge">1</span><span><strong>Screen</strong> <span class="muted">— opens every title and lists its PDFs.</span></span></li>
@@ -202,13 +206,13 @@ function cardHtml(a, i) {
     : j.status === "claude" ? `${icon("sparkles", "width:14px;height:14px")}Reading in Claude`
     : busy ? `<span class="spin" aria-hidden="true"></span>${esc(label)}${j.since ? ` <span class="elapsed" data-since="${j.since}">${clock(j.since)}</span>` : ""}`
     : `<span class="dot"></span>${esc(when(a.broadcast) || "SGX")}`;
-  const claudeBtn = (why, text, cls = "btn-ember") => !a.url ? "" : `<button type="button" class="btn ${cls}" data-claude="${i}" data-why="${why}" title="Opens a Claude chat that reads the filing itself through the SGX Financials connector">${icon("sparkles")}${text}</button>`;
+  const claudeBtn = (why, text, cls = "btn-ember") => !a.url ? "" : `<button type="button" class="btn ${cls}" data-claude="${i}" data-why="${why}" ${why === "recheck" ? 'data-tour="recheck"' : ""} title="Opens a Claude chat that reads the filing itself through the SGX Financials connector">${icon("sparkles")}${text}</button>`;
   const action = j.status === "done"
     ? unverified
       ? a.url
-        ? `${claudeBtn("recheck", "Check with Claude")}<a class="btn btn-outline btn-icon" href="${j.blobUrl}" download="${esc(j.filename)}" title="Download the Excel anyway (figures not verified)" aria-label="Download the Excel anyway (figures not verified)">${icon("download")}</a>`
-        : `<a class="btn btn-ember" href="${j.blobUrl}" download="${esc(j.filename)}" title="The figures are not verified">${icon("download")}Excel</a>`
-      : `<a class="btn btn-ember" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Excel</a>`
+        ? `${claudeBtn("recheck", "Check with Claude")}<a class="btn btn-outline btn-icon" data-tour="excel" href="${j.blobUrl}" download="${esc(j.filename)}" title="Download the Excel anyway (figures not verified)" aria-label="Download the Excel anyway (figures not verified)">${icon("download")}</a>`
+        : `<a class="btn btn-ember" data-tour="excel" href="${j.blobUrl}" download="${esc(j.filename)}" title="The figures are not verified">${icon("download")}Excel</a>`
+      : `<a class="btn btn-ember" data-tour="excel" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Excel</a>`
     : busy
       ? `<button type="button" class="btn btn-ember" disabled><span class="spin" aria-hidden="true"></span>${esc(label)}</button>`
       : j.status === "skipped" ? (isSlides(j) && a.url
@@ -216,12 +220,12 @@ function cardHtml(a, i) {
         : `<button type="button" class="btn btn-outline" data-details="${i}">${icon("eye")}Why skipped</button>`)
       : j.status === "claude" ? `<button type="button" class="btn btn-ember" data-claude="${i}">${icon("sparkles")}Open in Claude</button>
         <button type="button" class="btn btn-outline" data-gemini="${i}" title="Read it here with ${esc(state.ai)} instead">Use ${esc(state.ai)}</button>`
-      : `<button type="button" class="btn ${a.kind === "other" ? "btn-outline" : "btn-ember"}" data-extract="${i}">${icon("sparkles")}${j.status === "failed" ? "Try again" : "Extract"}</button>`;
+      : `<button type="button" class="btn ${a.kind === "other" ? "btn-outline" : "btn-ember"}" data-extract="${i}" ${a.kind === "results" ? 'data-tour="extract"' : ""}>${icon("sparkles")}${j.status === "failed" ? "Try again" : "Extract"}</button>`;
   const saved = j.saved ? ` · ${j.merged ? "merged into" : "saved to"} folder` : j.saveError ? " · not saved to folder" : "";
   const status = j.status === "done"
     ? unverified
-      ? `<span class="card-note bad multiline" title="${esc(v.reasons.join("; "))}">${j.sentToClaude ? "Sent to Claude · Excel link in the chat" : `Not verified: ${esc(v.summary || v.reasons[0] || "")}`}${saved}</span>`
-      : `<span class="card-note">${v.pass} check${v.pass === 1 ? "" : "s"} pass, none fails${saved}</span>`
+      ? `<span class="card-note bad multiline" data-tour="verdict" title="${esc(v.reasons.join("; "))}">${j.sentToClaude ? "Sent to Claude · Excel link in the chat" : `Not verified: ${esc(v.summary || v.reasons[0] || "")}`}${saved}</span>`
+      : `<span class="card-note" data-tour="verdict">${v.pass} check${v.pass === 1 ? "" : "s"} pass, none fails${saved}</span>`
     : j.status === "failed" ? `<span class="card-note bad" title="${esc(j.error)}">${esc(j.error)}</span>`
     : j.status === "skipped" ? `<span class="card-note muted" title="${esc(j.error)}">${esc(isSlides(j) ? "Presentation only: no formal financial statements" : j.error)}</span>`
     : j.status === "claude" ? `<span class="card-note muted" title="The Excel link arrives in the Claude chat">Sent to Claude ${esc(CLAUDE_MODEL)} · Excel link in the chat</span>`
@@ -230,14 +234,14 @@ function cardHtml(a, i) {
   const name = esc(nameCase(a.issuer) || a.fileName || "Unknown issuer");
   // Cards fade in once, when a screen's results first appear; later redraws don't replay it.
   const motion = state.animate ? `animation-delay:${Math.min(i, 12) * 30}ms` : "animation:none";
-  return `<article class="card ${j.status} ${unverified ? "unverified" : ""} ${a.kind === "other" ? "other" : ""}" data-card="${i}" data-accent="${accentFor(a.stock_code || a.issuer)}" style="${motion}">
+  return `<article class="card ${j.status} ${unverified ? "unverified" : ""} ${a.kind === "other" ? "other" : ""}" data-card="${i}" ${a.kind === "results" ? 'data-tour="card"' : ""} data-accent="${accentFor(a.stock_code || a.issuer)}" style="${motion}">
     <div class="band">
       <svg class="route" viewBox="0 0 260 104" preserveAspectRatio="none" aria-hidden="true"><path d="M20 84 C70 70 90 40 140 46 S210 20 250 14" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 7"/></svg>
       <span class="pill">${pill}</span>
       <span class="code">${esc(a.stock_code || "SGX")}</span>
     </div>
     <div class="card-body">
-      ${hasDetails ? `<button type="button" class="name name-btn" data-details="${i}" title="Show pages and checks">${name}</button>` : `<span class="name">${name}</span>`}
+      ${hasDetails ? `<button type="button" class="name name-btn" data-details="${i}" ${j.status === "done" ? 'data-tour="details"' : ""} title="Show pages and checks">${name}</button>` : `<span class="name">${name}</span>`}
       ${a.url ? `<a class="title" href="${esc(a.url)}" target="_blank" rel="noopener" title="${esc(a.title)}">${esc(shortTitle(a.title))}</a>` : `<span class="title">${esc(shortTitle(a.title))}</span>`}
       ${filesLine(a)}
       ${status}
@@ -342,9 +346,9 @@ function renderCards() {
     $("#results").innerHTML = (results.length
       ? `<div class="grid">${results.map(([a, i]) => cardHtml(a, i)).join("")}</div>`
       : `<p class="muted" style="margin:0">No results filings for these dates.</p>`)
-      + (releases.length ? `<section class="releases"><h3>${icon("calendar", "width:18px;height:18px")}Results release dates</h3>
+      + (releases.length ? `<section class="releases" data-tour="releases"><h3>${icon("calendar", "width:18px;height:18px")}Results release dates</h3>
           <p class="muted">Companies announcing when their results will come out.</p><div id="releases"></div></section>` : "")
-      + (others.length ? `<details class="others" ${state.othersOpen ? "open" : ""}><summary>${icon("file", "width:15px;height:15px")}
+      + (others.length ? `<details class="others" ${state.othersOpen ? "open" : ""}><summary data-tour="others">${icon("file", "width:15px;height:15px")}
           ${others.length} other announcement${others.length === 1 ? "" : "s"} in this category: releases, presentations, updates and duplicate filings.
           Not extracted unless you choose to.</summary>
           <div class="grid">${others.map(([a, i]) => cardHtml(a, i)).join("")}</div></details>` : "");
@@ -382,9 +386,9 @@ function renderBulk() {
       <button type="button" class="btn btn-outline" id="bulkStop" ${state.bulk.stop ? "disabled" : ""}>${state.bulk.stop ? "Stopping…" : "Stop"}</button>`;
   } else {
     if (done.length > 1 || (done.length && !todo.length && !working))
-      html += `<button type="button" class="btn ${todo.length ? "btn-outline" : "btn-ember"}" id="bulkZip">${icon("download")}Download all (${done.length})</button>`;
+      html += `<button type="button" class="btn ${todo.length ? "btn-outline" : "btn-ember"}" id="bulkZip" data-tour="download-all">${icon("download")}Download all (${done.length})</button>`;
     if (todo.length > 1 || (todo.length && !done.length))
-      html += `<button type="button" class="btn btn-ember" id="bulkRun">${icon("sparkles")}Extract all (${todo.length})</button>`;
+      html += `<button type="button" class="btn btn-ember" id="bulkRun" data-tour="extract-all">${icon("sparkles")}Extract all (${todo.length})</button>`;
   }
   el.innerHTML = html;
   el.hidden = !html;
@@ -426,6 +430,7 @@ async function screen(ev) {
     if (e.auth) openSheet("#settingsSheet");
   } finally {
     btn.disabled = false;
+    tourSignal("screened");
   }
 }
 
@@ -1395,7 +1400,8 @@ $("#results").addEventListener("click", async (e) => {
   if (state.bulk && b.dataset.gemini == null) return;
   a.readWith = b.dataset.gemini != null ? "gemini" : undefined; // Extract / Try again asks again for photos
   await folderReady();
-  extract(a);
+  await extract(a);
+  tourSignal("extracted");
 });
 
 // A Claude chat that reads the filing itself; a re-check is noted on the card (the link arrives in the chat).

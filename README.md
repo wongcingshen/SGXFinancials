@@ -247,6 +247,12 @@ yellow, Fraunces + Outfit, rounded cards, one accent colour per company):
 - **My standards** (header): upload results you already have in Excel or CSV, and each company's next
   filings come out in the same layout (see *Your own standards* below).
 - **Settings**: app password, how hard the AI reads, and COGS rules.
+- **Guided tour** (`tour.js`, `tour-core.js`): on a first visit, a spotlight walks through the real
+  page in six chapters (Welcome, Find results, The list, Extract, Many at once, Make it yours). It
+  waits while you screen SGX or extract a filing for real, then carries on, and skips controls that
+  aren't on the page (no results yet, a browser without folder support). **?** in the header
+  replays it or jumps to one chapter; "seen" is remembered in this browser (`sgxf-tour`). Steps are
+  data in `tour-core.js`, pointing at `data-tour` attributes on the controls.
 
 Preview it locally without SGX access or an API key:
 
@@ -392,6 +398,7 @@ SGX's terms of use apply to the data you retrieve; keep request volumes modest.
 
 ```bash
 python tests/test_offline.py               # scanner, pictures, checks, schema, Excel merge, standards
+node --test tests/tour_test.mjs             # the guided tour's steps, targets and state
 python tests/accuracy.py 2V6B.xlsx          # score a workbook against tests/answers/ (Bank of Baroda by default)
 CHROME_PATH=/path/to/chrome node tests/browse_test.mjs   # browser scraper vs a stand-in SGX site
 NODE_PATH=$(npm root -g) node tests/make_sample_pdf.cjs   # regenerate the sample PDF (needs playwright)
