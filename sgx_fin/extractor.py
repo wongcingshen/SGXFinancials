@@ -330,7 +330,8 @@ def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str =
 
     Picture pages (vision=True) go to the main provider as sharp images (Gemini: Flash, then
     Flash-Lite), with GLM 5.3 Flash behind it when GLM_FLASH is set; everything else goes to the
-    main provider as a PDF excerpt. `context` is added to the instruction (what the pages are);
+    main provider as a PDF excerpt, with DeepSeek Flash then GLM Flash (NVIDIA, GLM_FLASH key)
+    reading the pages' text layer when it fails (a 503, quota used up, ...). `context` is added to the instruction (what the pages are);
     `recheck` lists checks a first reading failed, and `gaps` where it left gross profit blank, for a
     second look. `cogs`: the industries and COGS rules for this filing (industries.for_filing). `deadline`
     (time.monotonic()) bounds the whole step.
@@ -342,8 +343,10 @@ def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str =
     attempts = [prov] if prov else []
     if vision and glm.api_key() and not model:
         attempts.append("glm")
+    elif not vision and glm.api_key() and not model:
+        attempts.append("text")  # Gemini down or out of quota: DeepSeek / GLM Flash read the text layer
     if not attempts:
-        raise RuntimeError("No AI key configured: set GEMINI_API_KEY (or GLM_FLASH for picture filings)")
+        raise RuntimeError("No AI key configured: set GEMINI_API_KEY (or GLM_FLASH, an NVIDIA or Z.ai key)")
 
     formats = formats or T.BUILTIN
     system, schema = build_system(formats, cogs), build_schema(formats, cogs)
@@ -355,10 +358,11 @@ def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str =
         instruction += GAPS.format(gaps=gaps)
     failures = []
     for who in attempts:
-        if who == "glm" and failures and deadline - time.monotonic() < 45:
-            failures.append(f"{glm.label()}: skipped, not enough time left")
+        if who in ("glm", "text") and failures and deadline - time.monotonic() < 45:
+            failures.append(f"{_who_label(who)}: skipped, not enough time left")
             break
-        name = glm.label() if who == "glm" else (model or (vision_models()[0] if vision and who == "gemini" else default_model(who)))
+        name = (glm.label() if who == "glm" else glm.text_label() if who == "text"
+                else model or (vision_models()[0] if vision and who == "gemini" else default_model(who)))
         cache_key = hashlib.sha256(pdf_bytes + f"{who}:{name}:{vision}:{locate}".encode()
                                    + system.encode() + instruction.encode()).hexdigest()[:16]
         cache_file = (cache_dir or pdf.parent) / f"{pdf.stem}.{cache_key}.extract.json"
@@ -369,6 +373,11 @@ def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str =
             if who == "glm":
                 data, used, usage = glm.extract(pdf, pages, system, instruction, deadline=deadline, formats=formats)
                 ex = Extraction(data, f"{used} via {'NVIDIA' if glm.is_nvidia() else 'Z.ai'}",
+                                {"input_tokens": usage.get("prompt_tokens"), "output_tokens": usage.get("completion_tokens")})
+            elif who == "text":
+                text = TEXT_LAYER.format(pages=_pages_text(pdf, pages)) + instruction
+                answer, used, usage = glm.ask(system + "\n\n" + glm.SKELETON, text, None, deadline, glm.text_models())
+                ex = Extraction(glm.coerce(answer, formats), f"{used} via {'NVIDIA' if glm.is_nvidia() else 'Z.ai'}",
                                 {"input_tokens": usage.get("prompt_tokens"), "output_tokens": usage.get("completion_tokens")})
             elif who == "gemini" and vision:
                 # A few pages: big images at the finest resolution; a long shortlist: smaller ones.
@@ -385,13 +394,33 @@ def extract(pdf: Path, pages: list[int], model: str | None = None, effort: str =
             else:
                 ex = _claude(pdf_bytes, instruction, name, effort, client, system, schema)
         except Exception as e:  # try the next provider, report all if none works
-            failures.append(f"{glm.label() if who == 'glm' else provider_label(who)}: {e}")
+            failures.append(f"{_who_label(who)}: {e}")
             continue
         if failures:
             ex.data["notes"] = (f"{ex.data.get('notes', '')} (Read by {ex.model} after: {'; '.join(failures)})").strip()
         cache_file.write_text(json.dumps({"data": ex.data, "model": ex.model, "usage": ex.usage}, indent=2))
         return ex
     raise RuntimeError(" | ".join(failures))
+
+
+def _who_label(who: str) -> str:
+    from . import glm
+    return glm.label() if who == "glm" else glm.text_label() if who == "text" else provider_label(who)
+
+
+TEXT_LAYER = ("The PDF's own text for these pages follows (text models can't see the PDF itself). Table rows "
+              "keep their line order, but columns may run together: use the column headings and the printed "
+              "totals to place each figure under its own period.\n\n{pages}\n\n")
+TEXT_LIMIT = 150_000  # characters of page text sent to a text model
+
+
+def _pages_text(pdf: Path, pages: list[int]) -> str:
+    """The text layer of the given 1-based pages, each under a "=== Page n ===" heading."""
+    from .page_scanner import page_texts
+
+    texts = page_texts(pdf)
+    out = "\n\n".join(f"=== Page {p} ===\n{texts[p - 1].strip()}" for p in pages if 1 <= p <= len(texts))
+    return out[:TEXT_LIMIT]
 
 
 TABLES_INSTRUCTION = """These tables were copied from pictures of pages {pages} of {name}, figures exactly as printed (brackets and minus signs are negatives; "-" is nil; "?" was unreadable: leave it out).
@@ -579,11 +608,18 @@ def _gemini(pdf_bytes: bytes | None, instruction: str, model: str, effort: str, 
                 last_err = e
                 continue  # not available for this key, or its quota is used up: try the next one
             raise
+        except errors.ServerError as e:
+            if e.code in (500, 502, 503, 504):
+                last_err = e
+                continue  # overloaded or down on Google's side: another model may still answer
+            raise
         return _gemini_result(resp, name)
     if getattr(last_err, "code", None) == 429:
         raise RuntimeError(f"Gemini quota used up on {', '.join(candidates)}. "
                            "Free-tier limits reset daily; try again later or set SGX_GEMINI_MODEL "
                            f"to another model. ({last_err})")
+    if getattr(last_err, "code", None) in (500, 502, 503, 504):
+        raise RuntimeError(f"Gemini unavailable on {', '.join(candidates)} ({last_err})")
     raise RuntimeError(f"No Gemini model available for this key: {last_err}")
 
 

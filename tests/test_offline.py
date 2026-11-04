@@ -259,6 +259,68 @@ def test_picture_filings_read_by_glm_on_nvidia():
         glm._listed.clear()
 
 
+def test_text_filing_falls_back_to_nvidia_when_gemini_is_down():
+    import os
+    import shutil
+    from google.genai import errors
+    from sgx_fin import glm
+
+    out = HERE / "out" / "text_fallback"
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    saved = {k: os.environ.pop(k, None) for k in ("GLM_FLASH", "GLM_MODEL", "GLM_BASE_URL", "GLM_API_KEY", "ZAI_API_KEY",
+                                                 "NVIDIA_TEXT_MODELS", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "AI_PROVIDER",
+                                                 "SGX_GEMINI_MODEL")}
+    os.environ["GLM_FLASH"] = "nvapi-test"
+    os.environ["GEMINI_API_KEY"] = "test"
+    glm._listed.clear()
+    calls, busy = [], set()
+
+    class Resp:
+        def __init__(self, body, status=200): self.body, self.status_code, self.ok, self.text = body, status, status < 400, json.dumps(body)
+        def json(self): return self.body
+
+    def get(url, **kw):
+        return Resp({"data": [{"id": "z-ai/glm-5.3-flash"}, {"id": "deepseek-ai/deepseek-v4-flash"}, {"id": "meta/llama-3.1-8b-instruct"}]})
+
+    def post(url, json=None, **kw):
+        calls.append(json["model"])
+        if json["model"] in busy:
+            return Resp({"error": "busy"}, 503)
+        assert "=== Page 1 ===" in json["messages"][1]["content"][-1]["text"]  # the PDF's text, no pictures
+        return Resp({"choices": [{"message": {"content": __import__("json").dumps(FAKE)}, "finish_reason": "stop"}], "usage": {}})
+
+    class Models:
+        def generate_content(self, model, **kw):
+            calls.append(model)
+            raise errors.ServerError(503, {"error": {"code": 503, "message": "overloaded", "status": "UNAVAILABLE"}})
+
+    class Client:
+        models = Models()
+
+    real_get, real_post = glm.requests.get, glm.requests.post
+    glm.requests.get, glm.requests.post = get, post
+    try:
+        assert glm.text_models() == ["deepseek-ai/deepseek-v4-flash", "z-ai/glm-5.3-flash"]
+        ex = extractor.extract(HERE / "sample_results.pdf", [1, 2, 3], cache_dir=out, client=Client())
+        assert ex.model == "deepseek-ai/deepseek-v4-flash via NVIDIA", ex.model
+        assert calls == extractor.GEMINI_MODELS + ["deepseek-ai/deepseek-v4-flash"], calls  # each Gemini model, then NVIDIA
+        assert "Gemini unavailable" in ex.data["notes"] and ex.data["income_statement"]["rows"]
+
+        # DeepSeek busy too: GLM Flash reads it.
+        busy.add("deepseek-ai/deepseek-v4-flash")
+        calls.clear()
+        ex = extractor.extract(HERE / "sample_results.pdf", [1, 2], cache_dir=out, client=Client())
+        assert ex.model == "z-ai/glm-5.3-flash via NVIDIA" and calls[-2:] == ["deepseek-ai/deepseek-v4-flash", "z-ai/glm-5.3-flash"]
+    finally:
+        glm.requests.get, glm.requests.post = real_get, real_post
+        for k, v in saved.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+        glm._listed.clear()
+
+
 def test_ai_finds_the_statements_when_keywords_are_missing():
     from pathlib import Path as P
     from sgx_fin.page_scanner import PageScore, ScanResult, score_page
