@@ -19,12 +19,14 @@ import pypdfium2.raw as pdfium_c
 # Title phrases: strong evidence when they appear in the top part of a page.
 TITLES = {
     "income_statement": [
-        r"statements? of (consolidated )?profit or loss",
+        # "Statement of Profit or Loss", "Statement of Profit and Loss and Other Comprehensive Income",
+        # "Statement of Consolidated Profit & Loss" (any qualifiers between "of" and "profit")
+        r"statements? of (?:(?:consolidated|group|condensed|interim|unaudited|audited)\s+)*profit (?:or|and|&) loss",
         r"(consolidated )?income statements?",
-        r"statements? of (consolidated )?comprehensive income",
-        r"profit (or|and) loss (and other comprehensive income )?statement",
-        r"statements? of profit or loss and other comprehensive income",
-        r"profit and loss accounts?",
+        r"statements? of (?:(?:consolidated|group|condensed|interim|unaudited|audited)\s+)*(?:comprehensive )?income",
+        r"statements? of (?:(?:consolidated|group|condensed|interim|unaudited|audited)\s+)*(?:operations|earnings)",
+        r"profit (?:or|and|&) loss (and other comprehensive income )?statement",
+        r"profit (?:and|&) loss accounts?",
         # Banks / Indian listings: "Statement of Standalone Audited Financial Results"
         r"statements? of (?:(?:audited|unaudited|reviewed|standalone|consolidated)\s+)*financial results",
         r"(?:standalone|consolidated) (?:(?:audited|unaudited|reviewed)\s+)?financial results",
@@ -80,6 +82,9 @@ NEGATIVE = [
     r"significant accounting policies", r"segment information", r"the board of directors",
 ]
 
+# Words that open the formal statements' headings in SGX results announcements.
+CONDENSED = re.compile(r"condensed\b")
+
 NUMBER = re.compile(r"\(?-?\d{1,3}(?:,\d{3})+(?:\.\d+)?\)?|\(?-?\d+\.\d+\)?|\(\d+\)")
 WORD = re.compile(r"[A-Za-z]{2,}")
 
@@ -131,6 +136,19 @@ class ScanResult:
         return len(self.titled) == len(TITLES)
 
     @property
+    def untitled(self) -> list[str]:
+        """Statements the scan picked on line items and number density alone, with no statement title
+        heading their pages. The pick is then a guess (a notes or review page full of "revenue" and
+        numbers can outscore the real statement whose title wording the scan doesn't know), so the
+        AI is asked to find the statement instead of being handed the guess."""
+        return [st for st in TITLES if self.selected.get(st) and st not in self.titled]
+
+    @property
+    def confident(self) -> bool:
+        """Every statement was found, each on a page headed by its title."""
+        return self.found_all and not self.untitled
+
+    @property
     def needs_vision(self) -> bool:
         """The statements are probably pictures the keyword scan can't read.
 
@@ -145,8 +163,8 @@ class ScanResult:
 
     @property
     def needs_ai_locate(self) -> bool:
-        """A text PDF where the deciding words for some statement weren't found."""
-        return not self.needs_vision and not self.found_all
+        """A text PDF where some statement wasn't found, or was found without its title."""
+        return not self.needs_vision and not self.confident
 
     @property
     def missing(self) -> list[str]:
@@ -288,16 +306,30 @@ def score_page(text: str, page_no: int) -> PageScore:
     numeric_ratio = nums / max(1, words + nums)
 
     neg = sum(1 for p in NEGATIVE if re.search(p, top, flags=re.M))
+    # Titles are matched with line breaks and runs of spaces folded to one space: long titles wrap
+    # ("...Statement of Profit and Loss and Other\nComprehensive Income").
+    top_flat, low_flat = " ".join(top.split()), " ".join(low.split())
+
+    # A page that names all three statements is a contents page or a note listing them, not a
+    # statement: its titles are cross-references and earn no title credit.
+    named = [st for st in TITLES if any(re.search(pat, low_flat) for pat in TITLES[st])]
+    index_page = len(named) == len(TITLES)
+    if index_page:
+        neg += 1
 
     scores, title_hits = {}, {}
     for st in TITLES:
         s = 0.0
         for pat in TITLES[st]:
-            if m := re.search(pat, top):
+            if not index_page and (m := re.search(pat, top_flat)):
                 s += 10
                 title_hits[st] = m.group(0)
+                # SGX's results format (Listing Rule Appendix 7.2) heads the formal statements
+                # "Condensed interim (consolidated) statement of ...": the surest sign of the real one.
+                if CONDENSED.search(top_flat[max(0, m.start() - 40):m.start()]):
+                    s += 4
                 break
-            if re.search(pat, low):
+            if re.search(pat, low_flat):
                 s += 2  # mentioned further down (e.g. a cross-reference)
                 break
         hits = sum(1 for kw in BODY[st] if kw in low)

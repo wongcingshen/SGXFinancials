@@ -144,7 +144,7 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
     deadline = deadline or time.monotonic() + 280
     vision = any(p in scan.picture_pages for p in pages)
     # The AI finds the statements itself when the keyword scan couldn't, or when pages were chosen by hand.
-    locate = vision or not scan.found_all or set(pages) != set(scan.all_selected)
+    locate = vision or not scan.confident or set(pages) != set(scan.all_selected)
     located, reading, turns, context, notes = None, None, {}, "", []
     if vision:
         shortlist = scan.vision_pages(cap=40) if (not manual and scan.needs_vision) else pages if len(pages) > READ_MAX else None
@@ -264,10 +264,11 @@ def not_results_reason(pdf: Path, scan: ScanResult) -> str | None:
 
 def default_pages(scan: ScanResult) -> list[int]:
     """The pages to send to the AI: the statements the keyword scan found; when it found only some,
-    a shortlist for the AI to find them in; when they are pictures, the picture pages."""
+    a shortlist for the AI to find them in (also when one was picked without its title heading the
+    page, so a guess is never read as the statement); when they are pictures, the picture pages."""
     if scan.needs_vision:
         return scan.vision_pages()
-    if not scan.found_all:
+    if not scan.confident:
         return scan.locate_pages()
     return scan.all_selected
 
