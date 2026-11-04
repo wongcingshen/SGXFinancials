@@ -1748,6 +1748,22 @@ def test_income_statement_title_wordings():
         s = score_page("XYZ HOLDINGS LIMITED\n" + title + body, 3)
         assert s.title_hits.get("income_statement"), title
         assert s.scores["income_statement"] >= 14, (title, s.scores)
+    # The headings of SGX's results format (Appendix 7.2) are titles, and weigh more than a bare title.
+    for title, st in [("Condensed interim consolidated statement of comprehensive income", "income_statement"),
+                      ("Condensed interim statement of financial position", "balance_sheet"),
+                      ("Condensed Interim Consolidated Statement of Cash Flows", "cash_flow")]:
+        assert score_page("XYZ LIMITED\n" + title + body, 3).title_hits.get(st), title
+    bare = score_page("Consolidated statement of comprehensive income" + body, 3).scores["income_statement"]
+    sgx = score_page("Condensed interim consolidated statement of comprehensive income" + body, 3).scores["income_statement"]
+    assert sgx > bare + 3, (sgx, bare)
+    # The contents page names every statement; it is not taken for any of them.
+    toc = score_page("XYZ HOLDINGS LIMITED\nUnaudited condensed interim financial statements\n"
+                     "A. Condensed interim consolidated statement of comprehensive income 3\n"
+                     "B. Condensed interim statements of financial position 5\n"
+                     "C. Condensed interim statements of changes in equity 6\n"
+                     "D. Condensed interim consolidated statement of cash flows 8\n"
+                     "E. Other information required by Listing Rule Appendix 7.2 20", 2)
+    assert toc.title_hits == {} and max(toc.scores.values()) < 14, toc
     # The statement outscores a review page that discusses the same line items.
     statement = score_page("A. Condensed Interim Consolidated Statement of Profit and Loss and Other\n"
                            "Comprehensive Income" + body, 3)

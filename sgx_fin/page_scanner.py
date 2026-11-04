@@ -82,6 +82,9 @@ NEGATIVE = [
     r"significant accounting policies", r"segment information", r"the board of directors",
 ]
 
+# Words that open the formal statements' headings in SGX results announcements.
+CONDENSED = re.compile(r"condensed\b")
+
 NUMBER = re.compile(r"\(?-?\d{1,3}(?:,\d{3})+(?:\.\d+)?\)?|\(?-?\d+\.\d+\)?|\(\d+\)")
 WORD = re.compile(r"[A-Za-z]{2,}")
 
@@ -307,13 +310,24 @@ def score_page(text: str, page_no: int) -> PageScore:
     # ("...Statement of Profit and Loss and Other\nComprehensive Income").
     top_flat, low_flat = " ".join(top.split()), " ".join(low.split())
 
+    # A page that names all three statements is a contents page or a note listing them, not a
+    # statement: its titles are cross-references and earn no title credit.
+    named = [st for st in TITLES if any(re.search(pat, low_flat) for pat in TITLES[st])]
+    index_page = len(named) == len(TITLES)
+    if index_page:
+        neg += 1
+
     scores, title_hits = {}, {}
     for st in TITLES:
         s = 0.0
         for pat in TITLES[st]:
-            if m := re.search(pat, top_flat):
+            if not index_page and (m := re.search(pat, top_flat)):
                 s += 10
                 title_hits[st] = m.group(0)
+                # SGX's results format (Listing Rule Appendix 7.2) heads the formal statements
+                # "Condensed interim (consolidated) statement of ...": the surest sign of the real one.
+                if CONDENSED.search(top_flat[max(0, m.start() - 40):m.start()]):
+                    s += 4
                 break
             if re.search(pat, low_flat):
                 s += 2  # mentioned further down (e.g. a cross-reference)
