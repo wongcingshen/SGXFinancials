@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  CHAPTERS, STEPS, back, chapterOf, fill, next, park, readSaved, shouldAutoStart, signal, skipMissing, startAt, writeSaved,
+  CHAPTERS, CLAUDE_MODEL, STEPS, back, chapterOf, fill, next, park, readSaved, shouldAutoStart, signal, skipMissing, startAt, writeSaved,
 } from "../public/tour-core.js";
 
 const memory = () => {
@@ -88,4 +88,10 @@ test("chapter label counts within the chapter", () => {
 test("the AI's name is filled in", () => {
   assert.equal(fill("{ai} reads it", "Gemini"), "Gemini reads it");
   assert.equal(fill("{ai} reads it", ""), "the AI reads it");
+});
+
+test("the Claude model named in the tour matches the app's", () => {
+  const app = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(app, new RegExp(`const CLAUDE_MODEL = "${CLAUDE_MODEL}"`));
+  assert.equal(fill("Claude ({claude})", "Gemini"), `Claude (${CLAUDE_MODEL})`);
 });
