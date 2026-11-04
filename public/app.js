@@ -586,8 +586,9 @@ async function extract(a, { pages } = {}) {
   } catch (e) {
     if (e.body?.not_results) {
       Object.assign(j, { status: "skipped", error: e.message, scan: e.body.scan ? { scan: e.body.scan, pages: [] } : null });
-      // A notice moves to the other announcements; results that came only as slides stay in view.
-      if (!e.body.scan?.presentation) a.kind = "other";
+      // Anything set aside (a notice, or results that came only as slides) moves to the other
+      // announcements, where its card still says why and offers Ask Claude.
+      a.kind = "other";
       renderCards();
       return;
     }
