@@ -1703,6 +1703,33 @@ def test_connector_uses_the_users_standards():
             os.environ["APP_PASSWORD"] = old_pw
 
 
+def test_only_listed_companies_are_screened():
+    """Results filed by issuers of bonds and notes alone (not listed companies) are left out."""
+    from sgx_fin import listed
+    from sgx_fin.sgx_client import _parse_announcement
+
+    rows = listed.bundled()
+    codes = {c for c, _ in rows}
+    assert len(rows) > 600 and {"D05", "O39", "Z74", "1E3", "5E2", "N33"} <= codes  # sheet codes as typed, fixed
+    assert not any("E+" in c for c in codes)
+    companies = listed.load(live=False)
+    fs = "Financial Statements and Related Announcement::"
+    item = lambda issuer, *c: {"title": fs + "Half Yearly Results", "issuer_name": issuer, "url": "https://links.sgx.com/a",
+                               "issuers": [{"stock_code": x, "issuer_name": issuer} for x in c]}
+    anns = [_parse_announcement(i) for i in [
+        item("MIYOSHI LIMITED", "M03"), item("BANK OF BARODA", "2V6B"), item("GRAB HOLDINGS LIMITED", "52WB"),
+        item("NOMURA HOLDINGS, INC", "HRMB", "N33"),  # shares and bonds in one filing: the share code is shown
+        item("NO VA LAND INVESTMENT GROUP CORPORATION"), item("KSH HOLDINGS LIMITED")]]  # no code: by name
+    kept, dropped = listed.split(anns, companies)
+    assert [(a.issuer, a.stock_code) for a in kept] == [
+        ("MIYOSHI LIMITED", "M03"), ("NOMURA HOLDINGS, INC", "N33"), ("KSH HOLDINGS LIMITED", "")]
+    assert [a.issuer for a in dropped] == ["BANK OF BARODA", "GRAB HOLDINGS LIMITED", "NO VA LAND INVESTMENT GROUP CORPORATION"]
+    # A new listing (IPO) is kept once SGX's live list carries its code.
+    ipo = _parse_announcement(item("NEWCO HOLDINGS LIMITED", "ZZ9"))
+    assert not listed.is_listed(ipo, companies)
+    assert listed.is_listed(ipo, listed.Listed(companies.codes | {"ZZ9"}, companies.names, "test"))
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

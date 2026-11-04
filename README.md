@@ -21,6 +21,19 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    and reads the result list: the data the page loads for itself (paged through with the page's
    own token), or else the links in the result table. SGX's `api.sgx.com` refuses direct requests
    without that page-generated token, which is why a browser is used.
+   **Only listed companies.** The category also carries results filed by issuers whose only SGX
+   listing is a bond or note (State Bank of India `3J7B`, Grab `52WB`, Bank of Baroda `2V6B`, or no
+   stock code at all). An announcement is kept only when one of its stock codes is a listed
+   company's (`scraper/listed.mjs`, `sgx_fin/listed.py`): those in `listings/companies.csv` (the SGX
+   companies list from the Google Sheet, plus a snapshot of SGX's own list of shares, REITs, business
+   trusts and SDRs for companies the sheet lacks), or in SGX's live list of securities
+   (`api.sgx.com/securities`, read at each screen, no token needed), so a **new IPO** is kept from its
+   first day of trading. A filing made for both shares and bonds is shown under the share code.
+   Without a stock code (the result-table fallback), the issuer's name is matched against the
+   companies' names instead. What was left out is reported (`debug.not_listed`, "N from bond issuers
+   left out" in the app); `--all-issuers` (CLI) or `all_issuers=1` (`/api/browse`) keeps everything.
+   To refresh the file from the sheet, export it as CSV and write it as `code,name,sector,source`
+   (check codes the spreadsheet turned into numbers, such as `1E3` shown as `1.00E+03`).
 2. **Open every link under "Title"** (clicking titles that aren't plain links) and list the files
    inside the announcement page's `announcement-attachment-list` element.
    Only **results filings** are opened: the Financial Statements category also carries notices

@@ -7,6 +7,7 @@
 // links rendered in the result table.
 
 import puppeteer from "puppeteer-core";
+import { filterListed, loadListed } from "./listed.mjs";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36";
@@ -87,20 +88,20 @@ function sgt(ms) {
 }
 
 export function fromApiItem(it) {
-  let code = first(it, "stock_code", "security_code", "securityCode", "issuer_code");
-  if (!code) {
-    for (const k of ["issuers", "securities", "issuer"]) {
-      const v = Array.isArray(it[k]) ? it[k][0] : it[k];
-      code = first(v, "stock_code", "security_code", "code");
-      if (code) break;
-    }
+  // Every stock code the announcement is filed under (shares and bonds can share one filing).
+  const codes = [first(it, "stock_code", "security_code", "securityCode", "issuer_code")];
+  for (const k of ["issuers", "securities", "issuer"]) {
+    for (const v of Array.isArray(it[k]) ? it[k] : [it[k]]) codes.push(first(v, "stock_code", "security_code", "code"));
   }
+  const stock_codes = [...new Set(codes.filter(Boolean))];
+  const code = stock_codes[0] || "";
   let broadcast = first(it, "broadcast_date_time", "submission_date_time", "submission_date");
   if (/^\d{12,}$/.test(broadcast)) broadcast = sgt(broadcast);
   return {
     title: first(it, "title", "announcement_title"),
     issuer: first(it, "issuer_name", "security_name", "company_name"),
     stock_code: code,
+    stock_codes,
     url: normUrl(first(it, "url", "link", "announcement_url")),
     broadcast,
     category: first(it, "category_name", "sub_category_name", "cat"),
@@ -135,6 +136,8 @@ export function fromRow({ title, url, cells }) {
 // ------------------------------------------------------------------ screening
 /**
  * Open an SGX company-announcements page URL and return its announcements.
+ * Only listed companies' announcements are returned (see listed.mjs); the rest (bond and note
+ * issuers) are counted in debug.not_listed. opts.allIssuers keeps them; opts.listed is a test hook.
  * opts.company filters by issuer substring or stock code; opts.preparePage(page) is a test hook.
  */
 export async function screen(browser, pageUrl, opts = {}) {
@@ -216,6 +219,14 @@ export async function screen(browser, pageUrl, opts = {}) {
   if (!anns.length) debug.body_excerpt = (await page.evaluate(() => document.body?.innerText || "").catch(() => "")).slice(0, 600);
   await page.close();
 
+  if (!opts.allIssuers) {
+    const listed = opts.listed || (await loadListed());
+    const { kept, dropped } = filterListed(anns, listed);
+    anns = kept;
+    debug.listed_source = listed.source;
+    if (listed.error) debug.listed_error = listed.error;
+    debug.not_listed = dropped.map((a) => ({ issuer: a.issuer, stock_code: a.stock_code, title: a.title }));
+  }
   if (opts.company) {
     const c = opts.company.toLowerCase();
     anns = anns.filter((a) => a.issuer.toLowerCase().includes(c) || a.stock_code.toLowerCase() === c);

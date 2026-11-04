@@ -117,16 +117,15 @@ def _first(d: dict, *keys: str, default: str = "") -> str:
 
 
 def _parse_announcement(item: dict) -> Announcement:
-    code = _first(item, "stock_code", "security_code", "securityCode", "issuer_code")
-    if not code:
-        for nested in ("issuers", "securities", "issuer"):
-            sub = item.get(nested)
-            if isinstance(sub, list) and sub and isinstance(sub[0], dict):
-                code = _first(sub[0], "stock_code", "security_code", "code")
-            elif isinstance(sub, dict):
-                code = _first(sub, "stock_code", "security_code", "code")
-            if code:
-                break
+    # Every stock code the announcement is filed under (shares and bonds can share one filing).
+    codes = [_first(item, "stock_code", "security_code", "securityCode", "issuer_code")]
+    for nested in ("issuers", "securities", "issuer"):
+        sub = item.get(nested)
+        for s in sub if isinstance(sub, list) else [sub]:
+            if isinstance(s, dict):
+                codes.append(_first(s, "stock_code", "security_code", "code"))
+    codes = list(dict.fromkeys(c for c in codes if c))
+    code = codes[0] if codes else ""
     broadcast = _first(item, "broadcast_date_time", "submission_date_time", "submission_date")
     if broadcast.isdigit() and len(broadcast) >= 12:  # epoch milliseconds
         broadcast = datetime.fromtimestamp(int(broadcast) / 1000, SGT).strftime("%Y-%m-%d %H:%M")
@@ -137,7 +136,7 @@ def _parse_announcement(item: dict) -> Announcement:
         url=_first(item, "url", "link"),
         broadcast=broadcast,
         category=_first(item, "category_name", "sub_category_name", "cat"),
-        raw=item,
+        raw={**item, "stock_codes": codes},
     )
 
 
@@ -150,11 +149,14 @@ class SGXClient:
         self.last_debug: dict = {}
 
     # ---------------------------------------------------------------- screen
-    def screen(self, screen: Screen, company: str | None = None, attachments: bool = False) -> list[Announcement]:
+    def screen(self, screen: Screen, company: str | None = None, attachments: bool = False,
+               all_issuers: bool = False) -> list[Announcement]:
         """All announcements matching the page URL, optionally filtered by company name/code.
 
-        With attachments=True the browser also opens every Title link and records the PDFs in
-        its announcement-attachment-list (kept in Announcement.raw["attachments"]).
+        Only listed companies' announcements are returned (see listed.py): results filed by issuers
+        of bonds and notes alone are left out and counted in last_debug["not_listed"], unless
+        all_issuers=True. With attachments=True the browser also opens every Title link and records
+        the PDFs in its announcement-attachment-list (kept in Announcement.raw["attachments"]).
         """
         anns = None
         if self.token:
@@ -162,8 +164,15 @@ class SGXClient:
                 anns = [_parse_announcement(i) for i in self._fetch_all(screen)]
             except PermissionError:
                 anns = None  # token expired: fall back to the browser
+            if anns is not None and not all_issuers:
+                from . import listed
+                companies = listed.load()
+                anns, dropped = listed.split(anns, companies)
+                self.last_debug = {"listed_source": companies.source, **({"listed_error": companies.error} if companies.error else {}),
+                                   "not_listed": [{"issuer": a.issuer, "stock_code": a.stock_code, "title": a.title} for a in dropped]}
         if anns is None:
-            out = run_browser("screen", screen.page_url, *(["--attachments"] if attachments else []))
+            out = run_browser("screen", screen.page_url, *(["--attachments"] if attachments else []),
+                              *(["--all-issuers"] if all_issuers else []))
             self.last_debug = out.get("debug", {})
             anns = [Announcement(a["title"], a["issuer"], a["stock_code"], a["url"], a["broadcast"],
                                  a["category"], a) for a in out["announcements"]]

@@ -321,15 +321,20 @@ function renderCards() {
   const nResults = list.filter((a) => a.kind === "results").length;
   const nRelease = list.filter((a) => a.kind === "release_date").length;
   const nOther = list.length - nResults - nRelease;
-  if (state.range !== undefined)
+  const hidden = state.debug?.not_listed || [];  // issuers with only bonds or notes on SGX
+  if (state.range !== undefined) {
     $("#annNote").textContent = [`${nResults} results filing${nResults === 1 ? "" : "s"}`,
-      nRelease && `${nRelease} release date${nRelease === 1 ? "" : "s"}`, nOther && `${nOther} other`, state.range].filter(Boolean).join(" · ");
+      nRelease && `${nRelease} release date${nRelease === 1 ? "" : "s"}`, nOther && `${nOther} other`,
+      hidden.length && `${hidden.length} from bond issuers left out`, state.range].filter(Boolean).join(" · ");
+    $("#annNote").title = hidden.length ? `Not listed companies on SGX (bonds, notes only): ${[...new Set(hidden.map((h) => h.issuer))].join(", ")}` : "";
+  }
   if (!list.length) {
     const d = state.debug || {};
     const saw = d.source ? `<p style="font-size:12.5px">What the browser saw: “${esc(d.title || "untitled page")}”, ${d.counts ? `${d.counts.table} rows in the table, ${d.counts.page_data} in the page data` : `${d.dom_links ?? 0} links`}.${
       d.body_excerpt ? `<br><span class="mono">${esc(d.body_excerpt.slice(0, 240))}</span>` : ""}</p>` : "";
     $("#results").innerHTML = `<div class="intro"><div><h3 style="margin-top:0">No financial results for these dates</h3>
-      <p>SGX lists nothing under Financial Statements for these dates${$("#company").value.trim() ? " and this company" : ""}. Try a wider range.</p>${saw}</div></div>`;
+      <p>SGX lists nothing under Financial Statements for these dates${$("#company").value.trim() ? " and this company" : ""}. Try a wider range.</p>${hidden.length
+      ? `<p style="font-size:12.5px">${hidden.length} announcement${hidden.length === 1 ? " was" : "s were"} left out: issuers with only bonds or notes on SGX (${esc([...new Set(hidden.map((h) => h.issuer))].join(", "))}).</p>` : ""}${saw}</div></div>`;
   } else {
     const results = list.map((a, i) => [a, i]).filter(([a]) => a.kind === "results");
     const releases = list.filter((a) => a.kind === "release_date");

@@ -2,6 +2,11 @@
 //   CHROME_PATH=/path/to/chrome node tests/browse_test.mjs
 import assert from "node:assert/strict";
 import { attachments, launchBrowser, pageText, screen } from "../scraper/sgx.mjs";
+import { bundled, filterListed, nameMatches } from "../scraper/listed.mjs";
+
+// The bundled companies list, without asking SGX for its live one.
+const rows = bundled();
+const LISTED = { codes: new Set(rows.map((r) => r.code)), names: [...new Set(rows.map((r) => r.name))], source: "bundled" };
 
 const TOKEN = "page-generated-token";
 const ROWS = [
@@ -30,8 +35,11 @@ function tablePage({ clickable }) {
 }
 
 // Listing that loads its records like sgx.com: a token-bearing call to api.sgx.com, 2 per page.
+// Miyoshi files under a (made-up) bond code and its share code; No Va Land has no stock code.
+const CODES = { M1: ["M03B", "M03"], N1: [], B1: ["2V6B"] };
 const items = ROWS.map(([, , issuer, , title, id], i) => ({
   title: fullTitle(title), issuer_name: issuer, url: annUrl(id),
+  issuers: CODES[id].map((stock_code) => ({ stock_code, issuer_name: issuer })),
   broadcast_date_time: Date.UTC(2026, 9, 30, 10, 2 + i), category_name: "Financial Statements",
 }));
 const apiPage = `<!doctype html><title>Company Announcements</title><body><div id="t"></div><script>
@@ -90,7 +98,7 @@ const browser = await launchBrowser();
 serveNewTabs(browser);
 try {
   // Title links in the results table, every title opened for its attachments.
-  const t = await screen(browser, URL_, { preparePage: site(tablePage({ clickable: false })), attachments: true });
+  const t = await screen(browser, URL_, { preparePage: site(tablePage({ clickable: false })), attachments: true, allIssuers: true });
   assert.equal(t.debug.source, "result table");
   const notice = t.announcements.find((a) => a.issuer.startsWith("KSH"));
   assert.equal(notice.kind, "release_date");
@@ -109,23 +117,35 @@ try {
   console.log("ok title links + attachment lists:", t.announcements.map((a) => `${a.issuer} (${a.attachments.length} PDFs)`).join(" | "));
 
   // Titles that are click targets (open a new tab) rather than plain links.
-  const c = await screen(browser, URL_, { preparePage: site(tablePage({ clickable: true })) });
+  const c = await screen(browser, URL_, { preparePage: site(tablePage({ clickable: true })), allIssuers: true });
   assert.equal(c.debug.clicked, 4);
   assert.deepEqual(c.announcements.map((a) => a.url), [...ROWS, NOTICE_ROW].map((r) => annUrl(r[5])));
   console.log("ok clicked every title:", c.announcements.length, "links");
 
   // Records the page loads for itself (non-list responses ignored), paged with the page's token.
   apiCalls = 0;
-  const a = await screen(browser, URL_, { preparePage: site(apiPage) });
+  const a = await screen(browser, URL_, { preparePage: site(apiPage), allIssuers: true });
   assert.equal(a.debug.source, "page data");
   assert.equal(a.announcements.length, 3);
   assert.equal(apiCalls, 2);
   assert.equal(a.announcements[0].broadcast, "2026-10-30 18:02");
   console.log("ok page data + pagination, config response ignored");
 
-  const f = await screen(browser, URL_, { preparePage: site(apiPage), company: "baroda" });
+  const f = await screen(browser, URL_, { preparePage: site(apiPage), company: "baroda", allIssuers: true });
   assert.deepEqual(f.announcements.map((x) => x.issuer), ["BANK OF BARODA"]);
   console.log("ok company filter");
+
+  // Only listed companies: Bank of Baroda (bonds only) and No Va Land (no stock code) are left out,
+  // and Miyoshi is shown under its share code rather than its bond's.
+  const l = await screen(browser, URL_, { preparePage: site(apiPage), listed: LISTED });
+  assert.deepEqual(l.announcements.map((x) => [x.issuer, x.stock_code]), [["MIYOSHI LIMITED", "M03"]]);
+  assert.deepEqual(l.debug.not_listed.map((x) => x.issuer), ["NO VA LAND INVESTMENT GROUP CORPORATION", "BANK OF BARODA"]);
+  // From the result table (no stock codes), by issuer name; unlisted issuers' pages aren't opened.
+  opened.clear();
+  const n = await screen(browser, URL_, { preparePage: site(tablePage({ clickable: false })), attachments: true, listed: LISTED });
+  assert.deepEqual(n.announcements.map((x) => x.issuer), ["MIYOSHI LIMITED", "KSH HOLDINGS LIMITED"]);
+  assert.deepEqual([...opened], ["M1"]);
+  console.log("ok only listed companies:", l.debug.not_listed.length, "and", n.debug.not_listed.length, "left out");
 
   const text = await pageText(browser, annUrl("B1"), { preparePage: site(""), waitMs: 1500 });
   assert.ok(text.includes("Announcement B1") && text.includes("Results.pdf"));
@@ -137,3 +157,11 @@ try {
 } finally {
   await browser.close();
 }
+
+// A new listing that isn't in the bundled file yet (an IPO) is kept once SGX lists its code.
+const ipo = { title: fullTitle("Half Yearly Results"), issuer: "NEWCO HOLDINGS LIMITED", stock_code: "ZZ9", url: annUrl("Z1") };
+assert.equal(filterListed([{ ...ipo }], LISTED).kept.length, 0);
+assert.equal(filterListed([{ ...ipo }], { ...LISTED, codes: new Set([...LISTED.codes, "ZZ9"]) }).kept.length, 1);
+assert.ok(nameMatches("YHI Intl", "YHI INTERNATIONAL LIMITED") && nameMatches("AEM USD", "AEM HOLDINGS LTD."));
+assert.ok(!nameMatches("KSH", "KSHE LIMITED") && !nameMatches("Bank of CN HK SDR 1to1", "BANK OF BARODA"));
+console.log("ok new listings kept once SGX lists them; names matched");

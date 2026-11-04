@@ -64,6 +64,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--to", dest="date_to")
         p.add_argument("--category", default=FINANCIAL_RESULTS_CATEGORY)
         p.add_argument("--company", help="filter by issuer name substring or stock code")
+        p.add_argument("--all-issuers", action="store_true",
+                       help="also list issuers of bonds and notes only (not companies listed on SGX)")
 
     def ai_args(p):
         p.add_argument("--model", default=None, help="default: SGX_GEMINI_MODEL / CLAUDE_MODEL or the provider default")
@@ -102,10 +104,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Screening {screen.page_url}")
     client = SGXClient()
     try:
-        anns = client.screen(screen, company=a.company, attachments=a.cmd == "run")
+        anns = client.screen(screen, company=a.company, attachments=a.cmd == "run", all_issuers=a.all_issuers)
     except RuntimeError as e:
         print(f"ERROR: {e}")
         return 1
+    hidden = (client.last_debug or {}).get("not_listed") or []
+    if hidden:
+        print(f"  left out {len(hidden)} announcement(s) from issuers not listed on SGX (bonds, notes): "
+              + ", ".join(sorted({h['issuer'] for h in hidden}))[:300] + "; --all-issuers to include them")
     if client.last_debug and not anns:
         print(f"  (browser: {client.last_debug})")
     others = [x for x in anns if (x.raw.get("kind") or classify_title(x.title)) != "results"]
