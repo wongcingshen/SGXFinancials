@@ -463,6 +463,7 @@ function renderFolder() {
 }
 
 async function chooseFolder() {
+  if (!canPickFolder) return false;
   try {
     state.dir = await window.showDirectoryPicker({ id: "sgx-financials", mode: "readwrite" });
     state.folderOk = true;
@@ -470,8 +471,10 @@ async function chooseFolder() {
     renderBulk();
     toast(`Workbooks will be saved in “${state.dir.name}”.`);
     await idb("readwrite", (st) => st.put(state.dir, "dir")); // remembered for the next visit
+    return true;
   } catch (e) {
     if (e.name !== "AbortError") toast(`Couldn’t use that folder: ${e.message}`);
+    return false;
   }
 }
 
@@ -615,12 +618,17 @@ async function extractAll() {
   const unverified = done.filter((a) => !verdictOf(a.job.result).ok).length;
   state.bulk = null;
   renderCards();
-  toast(`Extract all finished: ${done.length} workbook${done.length === 1 ? "" : "s"} ready${unverified ? `, ${unverified} not verified (Check with Claude)` : ""}.`);
+  // Auto-download: workbooks already went into the chosen folder as each one finished; any that
+  // couldn't (no folder, or this browser can't write to one) come down now as one zip.
+  const unsaved = done.filter((a) => !a.job.saved);
+  const where = state.folderOk && state.dir ? ` and saved to “${state.dir.name}”` : "";
+  toast(`Extract all finished: ${done.length} workbook${done.length === 1 ? "" : "s"} ready${done.length > unsaved.length ? where : ""}${unverified ? `, ${unverified} not verified (Check with Claude)` : ""}.`);
+  if (unsaved.length) await downloadAll(unsaved);
 }
 
 let zipLib;
-async function downloadAll() {
-  const done = state.items.filter((a) => a.job.status === "done");
+async function downloadAll(only) {
+  const done = only || state.items.filter((a) => a.job.status === "done");
   if (!done.length) return;
   zipLib ||= await new Promise((resolve, reject) => {
     const s = document.createElement("script");
@@ -1347,8 +1355,12 @@ $("#mcpGo").addEventListener("click", () => {
 $("#folderBtn").addEventListener("click", chooseFolder);
 $("#bulk").addEventListener("click", async (e) => {
   const b = e.target.closest("button");
-  if (b?.id === "bulkRun") await folderReady();
-  if (b?.id === "bulkRun") extractAll();
+  if (b?.id === "bulkRun") {
+    // Extract all saves into the download folder: ask for one now (still inside the click) if
+    // none is set, so every workbook lands there as it finishes. Cancel → one zip at the end.
+    if (!(await folderReady()) && !state.dir) await chooseFolder();
+    extractAll();
+  }
   if (b?.id === "bulkZip") downloadAll();
   if (b?.id === "bulkStop" && state.bulk) { state.bulk.stop = true; renderBulk(); }
 });
