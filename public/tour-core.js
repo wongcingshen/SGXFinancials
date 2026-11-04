@@ -21,7 +21,7 @@ export const CHAPTERS = [
     id: "welcome", name: "Welcome", blurb: "What the app does, and whether the server is ready.",
     steps: [
       { id: "welcome", target: null, cta: "Show me around", title: "Welcome to SGX Financials",
-        body: "Results announcements from SGX in, a standard Excel workbook out: income statement, balance sheet and cash flow, in ’000, checked against the printed totals. This tour takes about three minutes. You can try each step for real as you go, or close it any time." },
+        body: "This app collects the financial results that SGX-listed companies publish and turns them into Excel for you. Pick the dates, see every company that reported, and get each one’s income statement, balance sheet and cash flow in the same layout, ready to compare or build on. No more copying figures out of PDFs. The tour takes about three minutes, and you can close it any time." },
       { id: "status", target: "status", title: "Is the server ready?",
         body: "Green means {ai} is set up to read statements. Amber means a key is missing or the server can’t be reached: Settings shows which." },
     ],
