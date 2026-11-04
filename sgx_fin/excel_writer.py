@@ -27,6 +27,7 @@ from . import checks as C
 from . import template as T
 
 NUM_FMT = '#,##0;(#,##0);"-"'
+NUM_FMT_1DP = '#,##0.0;(#,##0.0);"-"'  # millions and billions
 EPS_FMT = '#,##0.00;(#,##0.00);"-"'
 HEAD_FILL = PatternFill("solid", fgColor="1F3864")
 SUB_FILL = PatternFill("solid", fgColor="D9E1F2")
@@ -148,7 +149,9 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
 
     # A bank gets the bank layout; the newest filing decides if a workbook somehow has both.
     fmt = next((r.get("format") for r in sorted(records, key=lambda r: r["period_end"], reverse=True)
-                if r.get("format")), meta.get("format") or "general")
+                if r.get("format")), meta.get("format") or (normalised.get("income_statement") or {}).get("format") or "general")
+    # A format learnt from the user's own workbook brings its unit, column order and signs.
+    conv = T.conventions(fmt, formats)
     verdicts = filing_verdicts(records)
     bad = [v for v in verdicts if not v["verdict"].get("ok")]
     warning = ("Not verified: " + " | ".join(f"{v['filing']}: {'; '.join(v['verdict'].get('reasons') or [])}" for v in bad[:2])
@@ -159,8 +162,8 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
         recs = [r for r in records if r["statement"] == st]
         # Group columns by length (full year, 9M, half year, quarter), latest first within each,
         # so quarters and years aren't interleaved; balance sheet dates simply by date.
-        recs.sort(key=lambda r: (r["months"], r["period_end"]), reverse=T.LATEST_FIRST)
-        _write_statement(ws, title, rows, recs, company, meta.get("stock_code", ""), currency, warning, industry)
+        recs.sort(key=lambda r: (r["months"], r["period_end"]), reverse=conv["latest_first"])
+        _write_statement(ws, title, rows, recs, company, meta.get("stock_code", ""), currency, warning, industry, conv)
 
     checks = run_checks(records)
     _write_checks(wb.create_sheet("Checks"), checks, verdicts)
@@ -189,10 +192,16 @@ def workbook_bytes(existing: bytes | None, normalised: dict, meta: dict,
     return buf.getvalue(), checks
 
 
-def _write_statement(ws, title, rows, recs, company, code, currency, warning="", industry=""):
+def _write_statement(ws, title, rows, recs, company, code, currency, warning="", industry="", conv=None):
+    """Figures are kept in '000 with costs negative; `conv` (T.conventions) sets the unit they are shown
+    in and rows with sign -1 (costs the user's workbooks show as positive) are flipped."""
+    conv = conv or T.conventions(None)
+    scale = T.OUTPUT_UNIT / conv["size"]
+    unit_label = conv["label"] or "in units"
+    num_fmt = NUM_FMT_1DP if conv["size"] >= 1_000_000 else NUM_FMT
     ws["A1"] = f"{company} ({code})" if code else company
     ws["A1"].font = Font(bold=True, size=13)
-    ws["A2"] = f"{title} — {currency} {T.OUTPUT_UNIT_LABEL} (EPS in cents)" + (f" · Industry: {industry}" if industry else "")
+    ws["A2"] = f"{title} — {currency} {unit_label} (EPS in cents)" + (f" · Industry: {industry}" if industry else "")
     ws["A2"].font = Font(italic=True, color="595959")
     if warning:  # a filing whose figures nothing confirms: said where the figures are, not only on Checks
         ws["A3"] = warning
@@ -225,8 +234,10 @@ def _write_statement(ws, title, rows, recs, company, code, currency, warning="",
                 a.alignment = Alignment(indent=1)
             for j, r in enumerate(recs, start=2):
                 v = r["values"].get(tr.key)
+                if isinstance(v, (int, float)):
+                    v = v * tr.sign if tr.key.startswith("eps") else round(v * scale * tr.sign, 6)
                 cell = ws.cell(row, j, v)
-                cell.number_format = EPS_FMT if tr.key.startswith("eps") else NUM_FMT
+                cell.number_format = EPS_FMT if tr.key.startswith("eps") else num_fmt
                 if tr.kind == "total":
                     cell.font = Font(bold=True)
                     cell.border = Border(top=THIN)

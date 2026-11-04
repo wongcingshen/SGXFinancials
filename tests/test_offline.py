@@ -1475,6 +1475,149 @@ def test_mcp_connector():
             os.environ["APP_PASSWORD"] = old_pw
 
 
+def listing_workbook() -> bytes:
+    """A whole listing: three companies laid out alike (S$ million, oldest year first, costs positive)
+    and a bank laid out its own way ('000, latest first, costs negative)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    for name, code, k, extra in (("Alpha Ltd", "A11", 1, False), ("Beta Holdings", "B22", 2, True), ("Gamma Corp", "C33", 3, False)):
+        ws = wb.create_sheet(code)
+        ws.append([f"{name} ({code})"])
+        ws.append(["All figures in S$ million"])
+        ws.append(["", "FY2023", "FY2024"])
+        ws.append(["Income Statement"])
+        for label, a, b in (("Revenue", 1000, 1200), ("Cost of sales", 600, 700), ("Gross profit", 400, 500),
+                            ("Administrative expenses", 100, 120), ("Profit before tax", 300, 380),
+                            ("Income tax expense", 50, 60), ("Profit for the year", 250, 320)):
+            ws.append([label, a * k, b * k])
+            if label.startswith(("Gross", "Profit")):
+                ws.cell(ws.max_row, 1).font = Font(bold=True)
+        if extra:
+            ws.append(["Other gains", 5, 6])
+        ws.append(["Balance Sheet"])
+        for label in ("Total assets", "Total liabilities", "Total equity"):
+            ws.append([label, 5000, 5500])
+            ws.cell(ws.max_row, 1).font = Font(bold=True)
+        ws.append(["Cash Flow"])
+        ws.append(["Net cash from operating activities", 300, 350])
+        ws.append(["Purchase of property, plant and equipment", 80, 90])
+    ws = wb.create_sheet("D05")
+    ws.append(["DBS Group Holdings Ltd (D05)"])
+    ws.append(["S$'000", "FY2024", "FY2023"])
+    ws.append(["Income Statement"])
+    for label, v in (("Interest income", 900), ("Interest expense", -400), ("Net interest income", 500),
+                     ("Operating expenses", -250), ("Allowances", -50), ("Profit before tax", 200), ("Tax", -30),
+                     ("Net profit", 170)):
+        ws.append([label, v, v * 0.9])
+    ws.append(["Balance Sheet"])
+    for label in ("Cash and balances with central banks", "Loans and advances", "Total assets", "Deposits", "Total liabilities"):
+        ws.append([label, 100, 90])
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_standards_learnt_from_the_users_workbooks():
+    from sgx_fin import standards as S, template as T
+
+    # The AI's review: names, a key, the outflows and a sum; the program checks the sum against the figures.
+    def review(clusters, deadline=None):
+        rows = [{"statement": "income_statement", "row": 2, "key": "gross_profit", "kind": "total", "outflow": False,
+                 "formula": "Revenue - Cost of sales"},
+                {"statement": "income_statement", "row": 0, "key": "revenue", "kind": "total", "outflow": False,
+                 "formula": "Cost of sales + 3"}]  # doesn't add up: dropped
+        return {1: {"name": "Expenses by function", "applies_to": "Industrials", "company_type": "general", "unit": "millions",
+                    "unit_evidence": "", "latest_first": True, "notes": "", "rows": rows},
+                2: {"name": "Bank", "applies_to": "Banks", "company_type": "bank", "unit": "unknown", "unit_evidence": "",
+                    "latest_first": True, "notes": "", "rows": []}}, "mock"
+
+    old = S.ai_review
+    S.ai_review = review
+    try:
+        res = S.learn("listing.xlsx", listing_workbook())
+    finally:
+        S.ai_review = old
+    assert res["companies"] == 4 and len(res["standards"]) == 2, res
+    one, bank = res["standards"]
+    assert sorted(c["code"] for c in one["companies"]) == ["A11", "B22", "C33"]  # standard 1 for A11, B22 and C33
+    assert [c["code"] for c in bank["companies"]] == ["D05"] and bank["companies"][0]["name"] == "DBS Group Holdings Ltd"
+    c = one["conventions"]
+    assert (c["unit"], c["latest_first"], c["expenses"]) == ("millions", False, "positive"), c  # the file's words and headers win
+    assert one["formulas"] == ["Gross profit = Revenue - Cost of sales"]
+    rows = {r["label"]: r for r in one["format"]["statements"]["income_statement"]["rows"]}
+    assert rows["Cost of sales"] == {"key": "cost_of_sales", "label": "Cost of sales", "kind": "item", "sign": -1}
+    assert rows["Gross profit"]["formula"] == "Revenue + Cost of sales"  # in the app's signs (costs negative)
+    assert rows["Income tax expense"]["key"] == "tax" and rows["Other gains"]["kind"] == "item"  # only Beta has it: kept
+    assert [r["label"] for r in one["format"]["statements"]["cash_flow"]["rows"]][1] == "Purchase of property, plant and equipment"
+    assert (bank["company_type"], bank["conventions"]["unit"], bank["conventions"]["latest_first"],
+            bank["conventions"]["expenses"]) == ("bank", "thousands", True, "negative")
+    assert bank["missing"] == ["Cash Flow"]  # filled from the built-in bank lines
+    assert S.learn("listing.xlsx", listing_workbook(), use_ai=False)["standards"][0]["id"] == one["id"]  # same layout, same id
+
+    # A CSV listing with a company column.
+    csv_text = "Stock Code,Company,Statement,Line item,FY2025,FY2024\n" + "".join(
+        f"{code},{name},Income Statement,{label},{v},{v}\n"
+        for code, name in (("X11", "Ex Ltd"), ("Y22", "Why Ltd"))
+        for label, v in (("Turnover", 10), ("Cost of sales", -6), ("Gross profit", 4), ("Taxation", -1), ("Net profit", 3)))
+    res = S.learn("all.csv", csv_text.encode(), use_ai=False)
+    (std,) = res["standards"]
+    assert sorted(c["code"] for c in std["companies"]) == ["X11", "Y22"]
+    assert std["conventions"]["latest_first"] is True and std["conventions"]["expenses"] == "negative"
+    keys = [r.get("key") for r in std["format"]["statements"]["income_statement"]["rows"]]
+    assert keys[:2] == ["revenue", "cost_of_sales"], keys
+
+    # A workbook this app made is read back too (its company from A1).
+    made, _ = workbook_bytes(None, extractor.normalise(FAKE), {"company_name": "ACME HOLDINGS LIMITED", "stock_code": "ACME",
+                                                                "currency": "SGD"})
+    (mine,) = S.learn("ACME.xlsx", made, use_ai=False)["standards"]
+    assert mine["companies"][0]["code"] == "ACME" and mine["conventions"]["unit"] == "thousands"
+    assert mine["conventions"]["latest_first"] is True and mine["conventions"]["expenses"] == "negative"
+
+    # A new filing of A11 comes out in its standard: millions, oldest first, costs positive, the file's labels.
+    fmt = S.chosen(json.dumps(one["format"]))
+    formats = {fmt["id"]: fmt}
+    norm = extractor.normalise(FAKE, formats)
+    assert norm["income_statement"]["format"] == one["id"]
+    data, checks = workbook_bytes(None, norm, {"company_name": "Alpha Ltd", "stock_code": "A11", "currency": "SGD"}, formats)
+    assert not [c for c in checks if c["status"] == "FAIL"], checks  # checks still run on the app's own figures
+    ws = load_workbook(io.BytesIO(data))["Income Statement"]
+    assert "SGD m" in ws["A2"].value
+    assert [c.value for c in ws[4]][1:] == ["6M Jun 2025", "6M Jun 2026"]  # oldest first
+    got = {r[0].value: [c.value for c in r[1:]] for r in ws.iter_rows(min_row=8) if r[0].value}
+    assert got["Revenue"] == [107.6, 120.512] and got["Cost of sales"] == [72.1, 80.412], got  # costs positive
+    assert got["Income tax expense"] == [3.05, 3.7] and got["Gross profit"] == [35.5, 40.1], got
+    assert ws["B8"].number_format.startswith("#,##0.0")
+    # Built-in formats are unchanged: '000, latest first, costs negative.
+    plain = load_workbook(io.BytesIO(workbook_bytes(None, extractor.normalise(FAKE), {"company_name": "A"})[0]))["Income Statement"]
+    assert "'000" in plain["A2"].value and plain["C9"].value == -72100
+
+    # The web API: upload -> standards; the company's standard sent with a recompute writes in it.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("vercel_app_std", HERE.parent / "api" / "index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    client = mod.app.test_client()
+    S.ai_review, old = (lambda clusters, deadline=None: ({}, "")), S.ai_review
+    try:
+        r = client.post("/api/learn_standard?op=learn_standard", data={"file": (io.BytesIO(listing_workbook()), "listing.xlsx")})
+    finally:
+        S.ai_review = old
+    assert r.status_code == 200 and len(r.get_json()["standards"]) == 2, r.get_json()
+    bad = client.post("/api/learn_standard?op=learn_standard", data={"file": (io.BytesIO(b"x"), "notes.pdf")})
+    assert bad.status_code == 400
+    nat = extractor.normalise(by_nature(), formats)
+    r = client.post("/api/recompute?op=recompute", data={
+        "normalised": json.dumps(nat), "meta": json.dumps({"company_name": "Alpha Ltd", "currency": "SGD", "format": one["id"]}),
+        "in_cogs": "[true, true, false, false, false]", "standard": json.dumps(one["format"])})
+    assert r.status_code == 200, r.get_json()
+    import base64
+    ws = load_workbook(io.BytesIO(base64.b64decode(r.get_json()["workbook_b64"])))["Income Statement"]
+    assert "SGD m" in ws["A2"].value
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

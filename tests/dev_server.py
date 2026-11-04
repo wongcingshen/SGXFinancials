@@ -157,6 +157,15 @@ def install_mocks():
             data[st]["page_numbers"] = nums  # original page numbers, as the template step is told
         return extractor.Extraction(data, "mock gemini-3.5-flash-lite", {"input_tokens": 3000, "output_tokens": 900})
 
+    def review(clusters, deadline=None):  # the AI's review of uploaded standards: names and types only
+        time.sleep(1.0)
+        from sgx_fin.standards import guess_type
+        return {n: {"name": f"{guess_type(c).title()} layout", "company_type": guess_type(c), "rows": [],
+                    "notes": "Mock review: the program's own reading of the lines."}
+                for n, c in enumerate(clusters, 1)}, "mock " + extractor.default_model()
+
+    from sgx_fin import standards
+    standards.ai_review = review
     SGXClient.screen, SGXClient.attachments, SGXClient.download = screen, attachments, download
     pipeline.extractor.extract = extract
     pictures.locate, pictures.read, extractor.extract_text = locate, read, extract_text
