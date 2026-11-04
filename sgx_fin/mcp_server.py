@@ -269,21 +269,27 @@ def screen_tool(args: dict, ctx: Context) -> dict:
     url = build_page_url(min(d1, d2), max(d1, d2))
     company = (args.get("company") or "").strip()
     if ctx.on_vercel:  # the Python function has no browser; the Node one does
-        anns = ctx.browse("screen", url=url, company=company)["announcements"]
+        out = ctx.browse("screen", url=url, company=company)
+        anns, hidden = out["announcements"], (out.get("debug") or {}).get("not_listed") or []
     else:
+        client = SGXClient()
         anns = [{"title": a.title, "issuer": a.issuer, "stock_code": a.stock_code, "url": a.url,
                  "broadcast": a.broadcast, "kind": a.raw.get("kind") or classify_title(a.title)}
-                for a in SGXClient().screen(Screen.from_url(url), company=company or None)]
+                for a in client.screen(Screen.from_url(url), company=company or None)]
+        hidden = (client.last_debug or {}).get("not_listed") or []
+    # Results of issuers with only bonds or notes on SGX are left out: say so.
+    left_out = (f"\nLeft out {len(hidden)} announcement(s) from issuers not listed on SGX (bonds, notes): "
+                + ", ".join(sorted({h.get('issuer', '') for h in hidden})) + ".") if hidden else ""
     if not anns:
         return _text(f"No financial-statements announcements on SGX for {d1} to {d2}"
-                     + (f" matching '{company}'" if company else "") + f".\nPage: {url}")
+                     + (f" matching '{company}'" if company else "") + f".\nPage: {url}" + left_out)
     lines = [f"{len(anns)} announcement(s), {d1} to {d2}" + (f", '{company}'" if company else "") + f". Page: {url}", ""]
     for a in anns:
         kind = a.get("kind") or classify_title(a.get("title", ""))
         tag = {"results": "RESULTS", "release_date": "release-date notice"}.get(kind, "other")
         lines.append(f"- [{tag}] {a.get('issuer', '')} ({a.get('stock_code', '')}) · {a.get('broadcast', '')} · "
                      f"{a.get('title', '')}\n  {a.get('url', '')}")
-    lines.append("\nCall open_filing with a RESULTS announcement's link to read it.")
+    lines.append("\nCall open_filing with a RESULTS announcement's link to read it." + left_out)
     return _text("\n".join(lines))
 
 

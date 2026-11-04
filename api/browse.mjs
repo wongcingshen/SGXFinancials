@@ -1,6 +1,7 @@
 // Vercel Node function: drives a headless browser through the SGX website.
 //   GET /api/browse?op=screen&url=<SGX announcements page URL>&company=&attachments=1
 //       attachments=1 also opens every Title link and lists its announcement-attachment-list PDFs
+//       Only listed companies' announcements are returned (not bond/note issuers'); all_issuers=1 keeps them all
 //   GET /api/browse?op=attachments&url=<links.sgx.com announcement URL>
 //   GET /api/browse?op=text&url=<announcement URL>   the page's readable text
 import { timingSafeEqual } from "node:crypto";
@@ -33,6 +34,7 @@ export default async function handler(req, res) {
     const { announcements, debug } = await screen(browser, url, {
       company: q.get("company") || "",
       attachments: q.get("attachments") === "1",
+      allIssuers: q.get("all_issuers") === "1",
     });
     return res.status(200).json({ page_url: url, count: announcements.length, announcements, debug });
   } catch (e) {
