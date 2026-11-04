@@ -318,6 +318,7 @@ function renderReleases() {
       <span class="rel-co"><b>${esc(nameCase(a.issuer))}</b><small>${esc(r?.period || shortTitle(a.title))}</small></span>
       <a class="rel-link" href="${esc(r?.pdf_url || a.url)}" target="_blank" rel="noopener">${icon("file", "width:15px;height:15px")}Notice</a></div>`;
   }).join("");
+  saveScreen();
 }
 
 function renderCards() {
@@ -356,6 +357,7 @@ function renderCards() {
     renderReleases();
   }
   renderBulk();
+  saveScreen();
 }
 
 function renderCard(item) {
@@ -364,6 +366,7 @@ function renderCard(item) {
   if (!el) return renderCards();
   el.outerHTML = cardHtml(item, i);
   renderBulk();
+  saveScreen();
   if ($("#runSheet").open && $("#runSheet").dataset.key === item.key) showDetails(item);
 }
 
@@ -404,6 +407,7 @@ async function screen(ev) {
   }
   btn.disabled = true;
   state.items = [];
+  clearSavedScreen(); // the last screen's cards are replaced by this one's
   renderBulk();
   renderSkeleton();
   try {
@@ -457,6 +461,46 @@ function idb(mode, fn) {
       open.onerror = () => resolve(undefined);
     } catch { resolve(undefined); }
   });
+}
+
+// ------------------------------------------------------------------ last screen, kept across reloads
+// The cards of the last screen (with their extractions and workbooks) are kept in this browser, so a
+// refresh shows them again. A new screen replaces them. Work still running when the page went away
+// can't resume: those cards come back as stopped, ready to try again.
+const SCREEN_KEY = "screen";
+let saveTimer = null;
+function saveScreen() {
+  if (!state.restored) return; // not before the saved screen has been read back
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const items = state.items.map((a) => {
+      const { blobUrl, ...job } = a.job;
+      if (job.result?.workbook_b64) job.result = { ...job.result, workbook_b64: undefined }; // the blob holds it
+      if (job.status in BUSY) Object.assign(job, { status: "failed", since: null, error: "Stopped when the page was reloaded. Try again." });
+      return { ...a, job };
+    });
+    const saved = { items, range: state.range, debug: state.debug, from: $("#from").value, to: $("#to").value,
+      company: $("#company").value, at: Date.now() };
+    idb("readwrite", (st) => st.put(saved, SCREEN_KEY));
+  }, 300);
+}
+
+function clearSavedScreen() {
+  clearTimeout(saveTimer);
+  idb("readwrite", (st) => st.delete(SCREEN_KEY));
+}
+
+async function restoreScreen() {
+  const saved = await idb("readonly", (st) => st.get(SCREEN_KEY));
+  state.restored = true;
+  if (!saved?.items?.length || state.items.length || $("#screenBtn").disabled) return; // a new screen has started
+  state.items = saved.items.map((a) => ({ ...a, job: { ...a.job, blobUrl: a.job.blob ? URL.createObjectURL(a.job.blob) : undefined } }));
+  Object.assign(state, { range: saved.range ?? "", debug: saved.debug || null });
+  if (saved.from) $("#from").value = saved.from;
+  if (saved.to) $("#to").value = saved.to;
+  $("#company").value = saved.company || "";
+  renderCards();
+  loadReleaseDates(); // any notice whose date hadn't been read yet
 }
 
 function renderFolder() {
@@ -1437,3 +1481,5 @@ if (savedStandards().some((x) => !x.token) || (savedStandards().length && !store
 if (canPickFolder) idb("readonly", (st) => st.get("dir")).then((d) => { state.dir = d || null; renderFolder(); });
 renderFolder();
 if (iso(deep.get("from"))) screen();
+else restoreScreen();
+state.restored ||= Boolean(iso(deep.get("from"))); // a deep link screens afresh: save its cards
