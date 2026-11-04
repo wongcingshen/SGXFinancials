@@ -56,16 +56,17 @@
       <span class="brand-name">SGX Financials</span>
     </a>
     <div class="header-actions">
-      <span class="status-pill" id="statusPill"><span class="dot"></span><span id="statusText">Checking server…</span></span>
-      <button type="button" class="btn btn-outline" id="openClaude" aria-label="Add to Claude">
+      <span class="status-pill" id="statusPill" data-tour="status"><span class="dot"></span><span id="statusText">Checking server…</span></span>
+      <button type="button" class="btn btn-outline" id="openClaude" aria-label="Add to Claude" data-tour="claude">
         <svg class="i"><use href="#i-plug"/></svg><span class="hide-sm">Add to Claude</span>
       </button>
-      <button type="button" class="btn btn-outline" id="openStandards" aria-label="My standards">
+      <button type="button" class="btn btn-outline" id="openStandards" aria-label="My standards" data-tour="standards">
         <svg class="i"><use href="#i-sheet"/></svg><span class="hide-sm">My standards</span>
       </button>
-      <button type="button" class="icon-btn" id="openSettings" aria-label="Settings">
+      <button type="button" class="icon-btn" id="openSettings" aria-label="Settings" data-tour="settings">
         <svg class="i"><use href="#i-sliders"/></svg>
       </button>
+      <button type="button" class="icon-btn help-btn" id="openTour" aria-label="Tour and help" title="Tour and help" data-tour="help">?</button>
     </div>
   </div>
 </header>
@@ -80,19 +81,19 @@
     </div>
 
     <form class="screen-bar" id="screenForm" autocomplete="off">
-      <div class="field">
+      <div class="field" data-tour="dates">
         <label class="lbl" for="from">From</label>
         <input type="date" id="from" required>
       </div>
-      <div class="field">
+      <div class="field" data-tour="dates">
         <label class="lbl" for="to">To</label>
         <input type="date" id="to" required>
       </div>
-      <div class="field company">
+      <div class="field company" data-tour="company">
         <label class="lbl" for="company">Company or stock code</label>
         <input type="text" id="company" placeholder="All companies">
       </div>
-      <button type="submit" class="btn btn-ink" id="screenBtn">
+      <button type="submit" class="btn btn-ink" id="screenBtn" data-tour="screen">
         <svg class="i"><use href="#i-search"/></svg>Screen SGX
       </button>
     </form>
@@ -105,7 +106,7 @@
         <span class="note" id="annNote">Financial Statements</span>
       </div>
       <div class="toolbar">
-        <button type="button" class="btn btn-outline" id="folderBtn" hidden>
+        <button type="button" class="btn btn-outline" id="folderBtn" hidden data-tour="folder">
           <svg class="i"><use href="#i-folder"/></svg><span id="folderLabel">Choose download folder</span>
         </button>
         <div class="bulk" id="bulk" hidden></div>
@@ -274,6 +275,22 @@
   </div>
 </dialog>
 
+<!-- The ? button: replay the tour, or jump to one chapter -->
+<dialog class="sheet narrow" id="tourSheet" aria-labelledby="tourSheetTitle">
+  <div class="sheet-head">
+    <div class="t"><h2 id="tourSheetTitle">Take the tour</h2><div class="sub muted">A walk through the app on the real page. Try each step as you go.</div></div>
+    <button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="sheet-body">
+    <div class="form-row">
+      <span class="lbl">Jump to a chapter</span>
+      <div class="tour-chapters" id="tourChapters"></div>
+    </div>
+  </div>
+  <div class="sheet-foot"><button type="button" class="btn btn-ember btn-lg btn-block" data-tour-start>Start from the beginning</button></div>
+</dialog>
+
 <script src="/app.js"></script>
+<script type="module" src="/tour.js"></script>
 </body>
 </html>

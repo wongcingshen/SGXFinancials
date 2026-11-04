@@ -129,6 +129,16 @@ svg.i { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentCo
   .header-actions { gap: 4px; }
   .header-actions .status-pill { display: none; }
   .header-actions .btn-outline { width: 44px; padding: 0; }
+  .header-actions { flex-wrap: nowrap; }
+  .brand-name { white-space: nowrap; }
+}
+@media (max-width: 420px) {
+  .site-header .wrap { gap: 8px; }
+  .brand { gap: 8px; }
+  .brand svg { width: 32px; height: 32px; }
+  .brand-name { font-size: 19px; }
+  .header-actions { gap: 2px; }
+  .header-actions .btn-outline, .header-actions .icon-btn { width: 40px; min-height: 40px; height: 40px; }
 }
 
 /* ------------------------------------------------------------ hero */
@@ -461,3 +471,78 @@ details > summary::-webkit-details-marker { display: none; }
 .drop.busy { opacity: .7; pointer-events: none; }
 #stdFound .form-row { gap: 8px; }
 .std-card .lbl { font-size: 13px; }
+
+/* ------------------------------------------------------------ guided tour (tour.js) */
+.tour { position: fixed; inset: 0; z-index: 70; pointer-events: none; }
+.tour[hidden] { display: none; }
+/* Blocks the page except the hole, so only the highlighted control is live. */
+.tour-block { position: fixed; inset: 0; pointer-events: auto; }
+.tour-ring {
+  position: fixed; pointer-events: none;
+  box-shadow: 0 0 0 3px var(--color-sun), 0 0 0 200vmax var(--scrim);
+  transition: left var(--motion-base) var(--ease-move), top var(--motion-base) var(--ease-move),
+    width var(--motion-base) var(--ease-move), height var(--motion-base) var(--ease-move);
+}
+.tour.centred .tour-block { background: var(--scrim); }
+.tour.centred .tour-ring { display: none; }
+.tour-card {
+  position: fixed; pointer-events: auto; display: flex; flex-direction: column; gap: 12px;
+  padding: 18px 18px 14px; border-radius: 20px; background: var(--color-card); color: var(--color-ink);
+  box-shadow: var(--shadow-lift); animation: rise var(--motion-base) var(--ease-enter);
+}
+.tour.centred .tour-card {
+  animation-name: tour-fade; left: 50%; top: 50%; width: min(440px, calc(100vw - 32px)); transform: translate(-50%, -50%);
+  padding: 22px 22px 16px; border-radius: var(--radius-sheet);
+}
+@media (max-width: 640px) {
+  .tour.centred .tour-card { top: auto; bottom: 0; transform: translateX(-50%); width: 100vw; border-radius: var(--radius-sheet) var(--radius-sheet) 0 0; padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+}
+.tour-top { display: flex; align-items: flex-start; gap: 8px; }
+.tour-heading { flex: 1; min-width: 0; }
+.tour-eyebrow { margin: 0 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--color-ember-deep); }
+.tour-card h2 { margin: 0; font-family: var(--font-display); font-size: 21px; font-weight: 600; line-height: 1.2; }
+.tour-x { width: 36px; height: 36px; margin: -6px -6px 0 0; }
+.tour-body { margin: 0; font-size: 14px; line-height: 1.55; color: var(--color-muted); text-wrap: pretty; }
+.tour-dots { display: flex; gap: 5px; }
+.tour-dots span { width: 6px; height: 6px; border-radius: 99px; background: var(--color-line); transition: width var(--motion-base) var(--ease-move); }
+.tour-dots .past { background: var(--color-muted); }
+.tour-dots .on { width: 18px; background: var(--color-ember); }
+.tour-actions { display: flex; align-items: center; gap: 6px; }
+.tour-count { flex: 1; font-size: 12.5px; font-weight: 600; color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.btn-ghost { background: transparent; color: var(--color-ink); padding: 0 14px; }
+.btn-ghost:hover { background: var(--color-chip); }
+.tour-arrow {
+  position: absolute; left: var(--arrow-x, 24px); width: 16px; height: 16px; background: var(--color-card);
+  transform: rotate(45deg); border-radius: 3px; display: none;
+}
+.tour-card[data-side="below"] .tour-arrow { display: block; top: -7px; }
+.tour-card[data-side="above"] .tour-arrow { display: block; bottom: -7px; }
+
+/* While the tour waits for the app (screening, extracting). */
+.tour-wait {
+  position: fixed; left: 50%; top: max(14px, env(safe-area-inset-top)); transform: translateX(-50%); z-index: 70;
+  display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100vw - 32px);
+  padding: 6px 6px 6px 16px; border-radius: var(--radius-pill); background: var(--color-ink); color: #fff;
+  font-size: 13.5px; font-weight: 500; box-shadow: var(--shadow-lift); animation: tour-fade var(--motion-base) var(--ease-enter);
+}
+@keyframes tour-fade { from { opacity: 0; } }
+.tour-wait[hidden] { display: none; }
+.tour-wait-text { flex: 1; min-width: 0; }
+.tour-wait .link-btn { color: var(--color-sun); font-size: 13.5px; }
+.tour-wait .icon-btn { width: 36px; height: 36px; color: #fff; }
+.tour-wait .icon-btn:hover { background: rgba(255,255,255,.12); }
+@media (max-width: 560px) { .tour-wait { border-radius: 16px; } }
+
+/* The ? sheet: replay the tour or jump to a chapter. */
+.tour-chapters { display: flex; flex-direction: column; gap: 8px; }
+.tour-chapter {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; text-align: left;
+  border: 1px solid var(--color-line); border-radius: 14px; background: var(--color-card); color: var(--color-ink);
+  font: inherit; transition: background var(--motion-quick), border-color var(--motion-quick);
+}
+.tour-chapter:hover { background: var(--color-field); border-color: var(--color-line-dashed); }
+.tour-chapter > span:nth-child(2) { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tour-chapter b { font-weight: 600; font-size: 15px; }
+.tour-chapter small { font-size: 13px; color: var(--color-muted); line-height: 1.4; }
+.tour-chapter-n { font-size: 12px; font-weight: 600; color: var(--color-muted); white-space: nowrap; }
+.help-btn { font-family: var(--font-display); font-size: 19px; font-weight: 600; }
