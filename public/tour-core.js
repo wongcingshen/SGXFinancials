@@ -21,9 +21,9 @@ export const CHAPTERS = [
     id: "welcome", name: "Welcome", blurb: "What the app does, and whether the server is ready.",
     steps: [
       { id: "welcome", target: null, cta: "Show me around", title: "Welcome to SGX Financials",
-        body: "Results announcements from SGX in, a standard Excel workbook out: income statement, balance sheet and cash flow, in ’000, checked against the printed totals. This tour takes about three minutes. You can try each step for real as you go, or close it any time." },
-      { id: "status", target: "status", title: "Is the server ready?",
-        body: "Green means {ai} is set up to read statements. Amber means a key is missing or the server can’t be reached: Settings shows which." },
+        body: "This app collects the financial results that SGX-listed companies publish and turns them into Excel for you. Pick the dates, see every company that reported, and get each one’s income statement, balance sheet and cash flow in the same layout, ready to compare or build on. No more copying figures out of PDFs. The tour takes about three minutes, and you can close it any time." },
+      { id: "status", target: "status", title: "Is the AI key set up?",
+        body: "This shows whether the server has an API key for {ai}, the AI that reads the statements. Green: a key is in place. Amber: no key, or the server can’t be reached, so nothing can be extracted yet. Settings shows which. The key itself is only tried when you extract: a wrong or expired key shows up as an error on the card." },
     ],
   },
   {
@@ -81,8 +81,8 @@ export const CHAPTERS = [
     steps: [
       { id: "standards", target: "standards", title: "Your own layout",
         body: "Upload results you already keep in Excel. The lines, order, unit, period order and signs are learnt from it, and that company’s next filings come out the same way." },
-      { id: "claude", target: "claude", title: "Add to Claude",
-        body: "Adds SGX Financials to Claude as a connector. Claude can then screen SGX, read filings whose statements are pictures, and re-check figures that didn’t verify." },
+      { id: "claude", target: "claude", title: "Add to Claude for the hard filings",
+        body: "{ai} handles most filings well. Some are harder: statements that are scanned or photographed pages, or figures that fail the checks. Those need a stronger AI, so this adds SGX Financials to Claude as a connector, and Claude reads those pages itself. When an extraction finds the statements are photos, a prompt pops up offering Claude ({claude}) instead of {ai}. With no answer in 30 seconds, {ai} carries on." },
       { id: "settings", target: "settings", title: "Settings",
         body: "Speed against care (Faster, Balanced, Thorough), the app password if the server has one, and rules for how cost of goods sold is made up in your industries." },
       { id: "help", target: "help", title: "See this again",
@@ -156,4 +156,5 @@ export function chapterOf(i) {
 }
 
 /** Step copy with the app's AI name filled in. */
-export const fill = (text, ai) => String(text).replaceAll("{ai}", ai || "the AI");
+export const CLAUDE_MODEL = "Opus 5.5"; // keep in step with CLAUDE_MODEL in app.js
+export const fill = (text, ai) => String(text).replaceAll("{ai}", ai || "the AI").replaceAll("{claude}", CLAUDE_MODEL);
