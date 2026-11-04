@@ -630,6 +630,23 @@ let zipLib;
 async function downloadAll(only) {
   const done = only || state.items.filter((a) => a.job.status === "done");
   if (!done.length) return;
+  // With a download folder, Download all writes the workbooks there (one per company), not a zip.
+  if (state.folderOk && state.dir) {
+    const failed = [];
+    for (const a of done) {
+      try { await saveToFolder(a.job.filename || workbookName(a), a.job.blob); a.job.saved = true; a.job.saveError = ""; }
+      catch (e) { a.job.saveError = e.message || String(e); failed.push(a); }
+      renderCard(a);
+    }
+    const ok = done.length - failed.length;
+    if (ok) toast(`${ok} workbook${ok === 1 ? "" : "s"} saved to “${state.dir.name}”${failed.length ? `; ${failed.length} couldn’t be saved and come down as a zip` : ""}.`);
+    if (!failed.length) return;
+    return zipDownload(failed);
+  }
+  return zipDownload(done);
+}
+
+async function zipDownload(done) {
   zipLib ||= await new Promise((resolve, reject) => {
     const s = document.createElement("script");
     s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
@@ -1361,7 +1378,10 @@ $("#bulk").addEventListener("click", async (e) => {
     if (!(await folderReady()) && !state.dir) await chooseFolder();
     extractAll();
   }
-  if (b?.id === "bulkZip") downloadAll();
+  if (b?.id === "bulkZip") {
+    if (!(await folderReady()) && !state.dir) await chooseFolder(); // cancel → zip to Downloads
+    downloadAll();
+  }
   if (b?.id === "bulkStop" && state.bulk) { state.bulk.stop = true; renderBulk(); }
 });
 $("#results").addEventListener("click", async (e) => {
