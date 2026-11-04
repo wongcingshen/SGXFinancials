@@ -369,6 +369,10 @@ def _scan_summary(pdf: Path, scan, used_url: str | None, names: list[str]) -> li
            f"Attachments: {', '.join(names)}",
            f"Keyword scan (pages): {found}",
            f"Statement basis from headings: {scan.basis}"]
+    if scan.untitled:
+        names = ", ".join(st.replace("_", " ") for st in scan.untitled)
+        out.append(f"Unsure: no statement title heads the {names} page(s) above; they are a guess from line items. "
+                   "Check the filing's contents page and the statement titles before reading them.")
     if scan.picture_pages:
         out.append(f"Picture pages (scans/photos): {scan.picture_pages}")
     return out
@@ -398,7 +402,7 @@ def open_tool(args: dict, ctx: Context) -> dict:
 
     if not chosen:
         candidates = default_pages(scan)
-        if scan.found_all and not scan.needs_vision and len(scan.all_selected) <= READ_LIMIT:
+        if scan.confident and not scan.needs_vision and len(scan.all_selected) <= READ_LIMIT:
             chosen = scan.all_selected  # text filing read as images: the scan already knows the pages
         elif len(candidates) <= 3:
             chosen = candidates

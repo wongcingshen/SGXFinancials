@@ -1730,6 +1730,45 @@ def test_only_listed_companies_are_screened():
     assert listed.is_listed(ipo, listed.Listed(companies.codes | {"ZZ9"}, companies.names, "test"))
 
 
+
+def test_income_statement_title_wordings():
+    from pathlib import Path as P
+    from sgx_fin.page_scanner import PageScore, ScanResult, score_page
+    from sgx_fin.pipeline import default_pages
+
+    body = "\nGroup\n6 months ended\nRevenue 12,345 11,000\nCost of sales (8,000) (7,000)\nGross profit 4,345 4,000\n" \
+           "Profit before tax 1,000 900\nProfit for the period 800 700"
+    # Every common wording of the income statement's title is a title, also when it wraps onto a second line.
+    for title in ["A. Condensed Interim Consolidated Statement of Profit and Loss and Other\nComprehensive Income",
+                  "Condensed Interim Consolidated Statement of Profit or Loss and Other Comprehensive Income",
+                  "Consolidated Statement of Profit & Loss", "Statement of Comprehensive Income",
+                  "Consolidated Income Statement", "Consolidated Statements of Operations",
+                  "Consolidated Statement of Income", "Profit and Loss Account",
+                  "Statement of Consolidated Profit or Loss", "Profit or Loss Statement"]:
+        s = score_page("XYZ HOLDINGS LIMITED\n" + title + body, 3)
+        assert s.title_hits.get("income_statement"), title
+        assert s.scores["income_statement"] >= 14, (title, s.scores)
+    # The statement outscores a review page that discusses the same line items.
+    statement = score_page("A. Condensed Interim Consolidated Statement of Profit and Loss and Other\n"
+                           "Comprehensive Income" + body, 3)
+    notes = score_page("4. Revenue\nRevenue 12,345 11,000\nCost of sales (8,000) (7,000)\nGross profit 4,345 4,000\n"
+                       "Profit before tax 1,000 900\nProfit for the period 800 700\nAttributable to owners 700 600", 12)
+    assert statement.scores["income_statement"] > notes.scores["income_statement"]
+
+    # A statement picked on line items alone (no title heads its page) is a guess: the AI finds the
+    # statements instead, and the guess isn't read as the statement.
+    def page(n, titles, ratio=0.4):
+        return PageScore(n, {"income_statement": 20, "balance_sheet": 20, "cash_flow": 20}, ratio, True, titles)
+    pages = [page(1, {}, 0.05), page(2, {}, 0.05), page(3, {}, 0.5), page(4, {"balance_sheet": "x"}),
+             page(5, {"cash_flow": "x"}), page(6, {})]
+    guessed = ScanResult(P("g.pdf"), 6, pages, {"income_statement": [6], "balance_sheet": [4], "cash_flow": [5]}, [])
+    assert guessed.found_all and guessed.untitled == ["income_statement"]
+    assert not guessed.confident and guessed.needs_ai_locate
+    assert 3 in default_pages(guessed)  # the whole short document goes to the AI to find the statement in
+    pages[5] = page(6, {"income_statement": "x"})
+    titled = ScanResult(P("t.pdf"), 6, pages, {"income_statement": [6], "balance_sheet": [4], "cash_flow": [5]}, [])
+    assert titled.confident and default_pages(titled) == [4, 5, 6]
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):
