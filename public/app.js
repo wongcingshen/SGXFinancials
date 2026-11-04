@@ -849,7 +849,27 @@ function saveStandards(list) {
   try { localStorage.setItem("sgxf-standards", JSON.stringify(list)); }
   catch { toast("This browser has no room to keep that many standards. Remove some first."); return false; }
   renderStandards();
+  refreshTokens();
   return true;
+}
+// Tokens for the Claude connector (it can't see this browser): each standard's own, which goes into the
+// message a Claude button opens, and one with every standard and its companies for "Copy for Claude".
+// Worked out on the server whenever the standards change, so a click can use them straight away.
+let tokenRun = null;
+async function refreshTokens() {
+  const saved = savedStandards();
+  if (!saved.length) { store.set("sgxf-standards-pack", ""); return renderStandards(); }
+  const run = tokenRun = Symbol("tokens");
+  try {
+    const res = await api("/api/standards_token?op=standards_token", { method: "POST", timeoutMs: 60_000,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ standards: saved.map((x) => ({ format: x.format, companies: x.companies })) }) });
+    if (run !== tokenRun) return; // the standards changed again meanwhile
+    saved.forEach((x, k) => { x.token = res.tokens[k]; });
+    try { localStorage.setItem("sgxf-standards", JSON.stringify(saved)); } catch { /* kept without tokens */ }
+    store.set("sgxf-standards-pack", res.pack);
+  } catch { /* offline: tried again next time */ }
+  renderStandards();
 }
 // "DBS Group Holdings Ltd" and "DBS GROUP HOLDINGS LIMITED" are the same company.
 const CO_SUFFIX = /\b(LIMITED|LTD|PLC|INC|INCORPORATED|CORPORATION|CORP|BHD|BERHAD|TBK|PTE|CO|COMPANY|HOLDINGS?|GROUP|THE|REIT|TRUST)\b/g;
@@ -897,6 +917,18 @@ function renderStandards() {
   $("#stdFound").innerHTML = foundStandards.length ? `<div class="form-row"><span class="lbl">Found in your file${foundStandards.length > 1 ? "s" : ""}: ${foundStandards.length} standard${foundStandards.length === 1 ? "" : "s"}</span>
     ${foundStandards.map((s, k) => stdCard(s, k, false)).join("")}</div>` : "";
   $("#stdFoot").hidden = !foundStandards.length;
+  const pack = store.get("sgxf-standards-pack");
+  $("#stdClaude").hidden = !saved.length;
+  $("#stdClaude").disabled = !pack;
+  $("#stdClaudeHelp").hidden = !saved.length;
+}
+async function copyForClaude() {
+  const pack = store.get("sgxf-standards-pack");
+  if (!pack) return toast("Still preparing your standards for Claude; try again in a moment.");
+  const text = "My SGX Financials standards. For every filing, pass this token unchanged as `standard` to the SGX Financials "
+    + "connector's open_filing, extract_filing and submit_statements, with the stock_code and company_name:\n" + pack;
+  try { await navigator.clipboard.writeText(text); toast("Copied. Paste it into a Claude project’s instructions, or into a chat."); }
+  catch { toast("Your browser didn’t allow copying."); }
 }
 async function learnFiles(files) {
   files = [...files].filter(Boolean);
@@ -951,6 +983,7 @@ $("#stdFile").addEventListener("change", (e) => { learnFiles(e.target.files); e.
 ["dragleave", "drop"].forEach((t) => $("#stdDrop").addEventListener(t, () => $("#stdDrop").classList.remove("drag")));
 $("#stdDrop").addEventListener("drop", (e) => { e.preventDefault(); learnFiles(e.dataTransfer.files); });
 $("#stdSave").addEventListener("click", keepStandards);
+$("#stdClaude").addEventListener("click", copyForClaude);
 $("#stdSheet").addEventListener("change", (e) => {
   const input = e.target.closest("[data-std-co]");
   if (!input) return;
@@ -1201,9 +1234,11 @@ function claudePrompt(a, why = "photos") {
       + "Open it with open_filing (as_images=true to read the pages yourself), then submit_statements, and give me the Excel download link.",
   }[why] || "";
   const rule = cogsRuleFor(a);
+  const std = standardFor(a);
   return [
     ask,
     rule ? `My cost of goods sold rule for this company (pass it to open_filing and submit_statements as cogs_rule): ${JSON.stringify(rule)}` : "",
+    std?.token ? `Write it in my own standard “${std.name}”: pass this token unchanged as standard to open_filing, extract_filing and submit_statements: ${std.token}` : "",
     `Company: ${nameCase(a.issuer) || "?"}${a.stock_code ? ` (${a.stock_code})` : ""}`,
     a.title ? `Filing: ${shortTitle(a.title)}` : "",
     `Announcement: ${a.url}`,
@@ -1354,6 +1389,7 @@ syncEffort();
 renderIntro();
 loadHealth();
 loadIndustries();
+if (savedStandards().some((x) => !x.token) || (savedStandards().length && !store.get("sgxf-standards-pack"))) refreshTokens();
 if (canPickFolder) idb("readonly", (st) => st.get("dir")).then((d) => { state.dir = d || null; renderFolder(); });
 renderFolder();
 if (iso(deep.get("from"))) screen();

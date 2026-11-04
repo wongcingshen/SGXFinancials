@@ -21,11 +21,13 @@ company's one with each extraction.
 
 from __future__ import annotations
 
+import base64
 import csv
 import hashlib
 import io
 import json
 import re
+import zlib
 from datetime import date, datetime
 from pathlib import Path
 
@@ -662,6 +664,7 @@ def build_standard(n: int, cluster: dict, ai: dict | None) -> dict:
         "formulas": formulas,
         "companies": [{"name": x["name"], "code": x["code"], "source": x["source"]} for x in m],
         "notes": (ai.get("notes") or "").strip(),
+        "token": encode([(T.to_json(fmt, hints=False), [])]),
     }
 
 
@@ -715,3 +718,124 @@ def chosen(raw) -> dict | None:
     if not isinstance(fmt, dict):
         raise ValueError("a standard must be a JSON object")
     return T.check_format(fmt)
+
+
+# ------------------------------------------------------------------ tokens for the Claude connector
+# The server stores nothing, so a standard travels with the request: the web app puts the company's token in
+# the message it opens Claude with (or the user pastes a token with all their standards into a Claude
+# project), and Claude passes it to the connector's tools as `standard`. A token is the format, compacted
+# (statements identical to a built-in one by name, keys only where they can't be worked out from the label),
+# with the companies it is for, zlib-compressed and base64url-encoded.
+TOKEN_PREFIX = "sgxstd1."
+KIND_CODES = {"header": "h", "item": "i", "total": "t"}
+KIND_NAMES = {v: k for k, v in KIND_CODES.items()}
+CO_SUFFIX = re.compile(r"\b(LIMITED|LTD|PLC|INC|INCORPORATED|CORPORATION|CORP|BHD|BERHAD|TBK|PTE|CO|COMPANY|HOLDINGS?|"
+                       r"GROUP|THE|REIT|TRUST)\b")
+
+
+def _default_key(st: str, label: str, kind: str) -> str:
+    return ("h_" + T._slug(label)) if kind == "header" else T.canonical_key(st, label)
+
+
+def _compact(fmt: dict) -> dict:
+    """A format (as to_json gives it) in as few characters as can be read back exactly."""
+    out = {"i": fmt["id"], "n": fmt.get("name", ""), "a": fmt.get("applies_to", ""), "s": {}}
+    if fmt.get("conventions"):
+        out["c"] = fmt["conventions"]
+    for st in T.STATEMENT_IDS:
+        rows = (fmt.get("statements") or {}).get(st, {}).get("rows") or []
+        sig = [(r.get("label"), r.get("kind", "item"), r.get("formula", ""), r.get("sign", 0)) for r in rows]
+        same = next((bid for bid, b in T.BUILTIN.items()
+                     if sig == [(r.label, r.kind, r.formula, 0) for r in b["statements"][st][1]]), None)
+        if same:
+            out["s"][st] = "=" + same
+            continue
+        packed = []
+        for r in rows:
+            kind = r.get("kind", "item")
+            key = r.get("key", "")
+            row = [r["label"], KIND_CODES.get(kind, "i"), "" if key == _default_key(st, r["label"], kind) else key,
+                   r.get("formula", ""), -1 if r.get("sign") == -1 else 0]
+            while row[-1] in ("", 0) and len(row) > 2:
+                row.pop()
+            packed.append(row)
+        out["s"][st] = packed
+    return out
+
+
+def _expand(c: dict) -> dict:
+    statements = {}
+    for st in T.STATEMENT_IDS:
+        rows = (c.get("s") or {}).get(st)
+        if isinstance(rows, str) and rows.startswith("="):
+            base = T.BUILTIN.get(rows[1:]) or T.BUILTIN["general"]
+            statements[st] = T.to_json(base, hints=False)["statements"][st]
+            continue
+        out = []
+        for r in rows or []:
+            label, kind, key, formula, sign = (list(r) + ["", "i", "", "", 0][len(r):])[:5]
+            row = {"label": label, "kind": KIND_NAMES.get(kind, "item")}
+            if key:
+                row["key"] = key
+            if formula:
+                row["formula"] = formula
+            if sign == -1:
+                row["sign"] = -1
+            out.append(row)
+        statements[st] = {"title": T.STATEMENT_TITLES[st], "rows": out}
+    return {"id": c.get("i") or "std", "name": c.get("n") or "Your standard", "applies_to": c.get("a") or "",
+            "conventions": c.get("c") or {}, "statements": statements}
+
+
+def encode(entries: list) -> str:
+    """entries: [(format JSON, [{"code", "name"}, ...]), ...] -> a token. With no companies, the standard is
+    for whichever company the token is used with."""
+    raw = {"p": [[_compact(fmt), [[c.get("code", ""), c.get("name", "")] for c in companies or []]]
+                 for fmt, companies in entries]}
+    data = zlib.compress(json.dumps(raw, separators=(",", ":"), ensure_ascii=False).encode(), 9)
+    return TOKEN_PREFIX + base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+
+def decode(token: str) -> list[tuple[dict, list[dict]]]:
+    """A token -> [(checked format, companies)]. ValueError when it isn't one or was copied wrongly."""
+    token = re.sub(r"\s+", "", str(token or ""))
+    if not token.startswith(TOKEN_PREFIX):
+        raise ValueError(f"a standard token starts with {TOKEN_PREFIX}")
+    body = token[len(TOKEN_PREFIX):]
+    try:
+        raw = json.loads(zlib.decompress(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4))))
+    except Exception:
+        raise ValueError("the standard token is damaged (part of it is missing or was copied wrongly)")
+    out = []
+    for fmt, companies in raw.get("p") or []:
+        out.append((T.check_format(_expand(fmt)), [{"code": c[0], "name": c[1]} for c in companies]))
+    if not out:
+        raise ValueError("the standard token holds no standard")
+    return out
+
+
+def _co_key(s: str) -> str:
+    s = re.sub(r"[^A-Z0-9 ]+", " ", str(s or "").upper())
+    return re.sub(r"\s+", " ", CO_SUFFIX.sub(" ", s)).strip()
+
+
+def same_company(c: dict, code: str = "", name: str = "") -> bool:
+    """'DBS GROUP HOLDINGS LTD' is 'DBS Group Holdings Limited'; stock codes decide when both have one."""
+    code = str(code or "").strip().upper()
+    if c.get("code") and code:
+        return c["code"].upper() == code
+    x, y = _co_key(c.get("name")), _co_key(name)
+    return len(x) >= 2 and len(y) >= 2 and (x == y or y.startswith(x + " ") or x.startswith(y + " "))
+
+
+def for_company(token: str, code: str = "", name: str = "") -> tuple[dict | None, str]:
+    """The company's standard in a token, and a word on what was found. A standard without companies is for
+    any company; with several, the one listing this company."""
+    entries = decode(token)
+    for fmt, companies in entries:
+        if not companies or any(same_company(c, code, name) for c in companies):
+            return fmt, f"your standard “{fmt['name']}”"
+    who = code or name or "this company"
+    return None, (f"Your standards don't include {who}: the built-in layout is used. "
+                  "(Pass stock_code or company_name so the right standard is picked.)" if not (code or name) else
+                  f"Your standards don't include {who}: the built-in layout is used.")

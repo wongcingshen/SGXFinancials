@@ -14,6 +14,11 @@ Tools
                        come back with the lines to read again.
   extract_filing       the server's own pipeline (Gemini / configured AI) for text filings
 
+The user's own standards (layouts learnt from their workbooks in the web app, sgx_fin/standards.py) come as
+a token (`standard`, "sgxstd1...."): one company's, from the web app's message, or all of them, pasted by the
+user. The tools then read the statements into those lines and write the workbook in that unit, column
+order and sign convention.
+
 Nothing is stored on the server: the download link carries the figures (compressed, signed with
 APP_PASSWORD) and the workbook is built when it is opened.
 """
@@ -67,7 +72,13 @@ download link it returns, and say plainly if the figures are still not verified.
 Re-checks: when the user asks you to re-check a filing whose checks failed with the server's AI, read it yourself \
 (open_filing with as_images=true, then submit_statements); don't call extract_filing, which repeats that reading. \
 Some results announcements carry only a presentation (slides) and no formal financial statements: say so rather \
-than submitting highlights as statements."""
+than submitting highlights as statements.
+
+The user's own standards: when the user (or a message from the web app) gives you a standard token, a string \
+starting "sgxstd1.", pass it unchanged as `standard` to open_filing, extract_filing and submit_statements for every \
+filing, with the stock_code and company_name (a token can hold several companies' standards; the server picks the \
+company's). The statements are then read into the user's own lines and the workbook is written in their layout \
+(unit, column order, signs). Copy the token exactly, every character."""
 
 # ------------------------------------------------------------------ tool definitions
 _URLS = {
@@ -79,6 +90,9 @@ _META = {
     "stock_code": {"type": "string", "description": "SGX stock code, e.g. D05"},
     "filing": {"type": "string", "description": "Announcement title"},
 }
+_STANDARD = {"standard": {
+    "type": "string", "description": "The user's own standard token (starts with \"sgxstd1.\"), when the user or the web "
+                                     "app's message gave one: pass it unchanged, with stock_code / company_name"}}
 _COGS_RULE = {"cogs_rule": {
     "type": "object", "description": "The user's own cost of goods sold rule for this company, when the user gave one "
                                      "(the web app puts it in its message): {match, industry, cogs}",
@@ -114,7 +128,7 @@ TOOLS = [
                 "pages": {"type": "array", "items": {"type": "integer"},
                           "description": "1-based pages of the PDF to return as full-resolution images"},
                 "as_images": {"type": "boolean", "description": "Return images even when the statements are text"},
-                **_COGS_RULE,
+                **_META, **_COGS_RULE, **_STANDARD,
             },
         },
         "annotations": {"readOnlyHint": True, "openWorldHint": True},
@@ -130,7 +144,7 @@ TOOLS = [
             "properties": {
                 "extraction": {"type": "object", "description": "company_name, format, currency, unit, basis, "
                                "income_statement, balance_sheet, cash_flow (each {page_numbers, periods, rows}), notes"},
-                **_URLS, **_META, **_COGS_RULE,
+                **_URLS, **_META, **_COGS_RULE, **_STANDARD,
                 "source_pdf": {"type": "string"},
                 "pages": {"type": "array", "items": {"type": "integer"}, "description": "PDF pages the figures came from"},
             },
@@ -145,7 +159,7 @@ TOOLS = [
                        "a filing and return the figures, checks and an Excel download link. Takes 1-3 minutes.",
         "inputSchema": {
             "type": "object",
-            "properties": {**_URLS, **_META, **_COGS_RULE,
+            "properties": {**_URLS, **_META, **_COGS_RULE, **_STANDARD,
                            "pages": {"type": "array", "items": {"type": "integer"}, "description": "Optional 1-based pages"}},
         },
         "annotations": {"readOnlyHint": True, "openWorldHint": True},
@@ -315,6 +329,26 @@ def cogs_rules(args: dict, stock_code: str = "", company: str = "") -> dict:
     return industries.for_filing(None, stock_code, company)
 
 
+def standard_formats(args: dict, stock_code: str = "", company: str = "") -> tuple[dict, str]:
+    """The formats for a call: the user's standard for the company alone when the call carries a token that
+    has one (so the filing is read into its lines), else the built-in ones; and a line saying which."""
+    from . import standards
+    token = args.get("standard")
+    if not token:
+        return T.BUILTIN, ""
+    try:
+        fmt, note = standards.for_company(token, stock_code or args.get("stock_code", ""),
+                                          company or args.get("company_name", ""))
+    except ValueError as e:
+        raise ToolError(f"The `standard` argument can't be used: {e}. Copy the token again exactly as the user gave it "
+                        "(every character), or leave `standard` out to use the built-in layout.")
+    if not fmt:
+        return T.BUILTIN, note
+    unit = T.conventions(fmt["id"], {fmt["id"]: fmt})
+    order = "latest period first" if unit["latest_first"] else "oldest period first"
+    return {fmt["id"]: fmt}, f"Written in {note} ({unit['unit']}, {order})."
+
+
 def _pages_arg(args: dict, page_count: int) -> list[int]:
     pages = sorted({int(p) for p in args.get("pages") or [] if str(p).lstrip("-").isdigit()})
     bad = [p for p in pages if not 1 <= p <= page_count]
@@ -335,6 +369,7 @@ def _scan_summary(pdf: Path, scan, used_url: str | None, names: list[str]) -> li
 
 
 def open_tool(args: dict, ctx: Context) -> dict:
+    formats, std_note = standard_formats(args)
     pdf, scan, used_url, names = load_filing(args, ctx)
     chosen = _pages_arg(args, scan.page_count)
     lines = _scan_summary(pdf, scan, used_url, names)
@@ -392,14 +427,15 @@ def open_tool(args: dict, ctx: Context) -> dict:
                   "contrast stretched). Read them yourself following the rules below, then call submit_statements with "
                   f"extraction=<the JSON>, plus announcement_url, source_pdf={json.dumps(pdf.name)}, pages={chosen}"
                   " and the company_name / stock_code if you know them.",
-              "", reading_rules(cogs=cogs_rules(args)), "", f"Source for submit_statements: {json.dumps({**source, 'pages': chosen})}"]
+              *([f"{std_note} Use only that format's keys, and pass the same `standard` to submit_statements."] if std_note else []),
+              "", reading_rules(formats, cogs=cogs_rules(args)), "", f"Source for submit_statements: {json.dumps({**source, 'pages': chosen})}"]
     return _text("\n".join(lines), extra=extra)
 
 
 def reading_rules(formats: dict | None = None, cogs: dict | None = None) -> str:
     """The same rules and template the server's own AI gets, plus the JSON shape to submit."""
     shape = {
-        "company_name": "…", "format": "general | bank", "industry": "manufacturing",
+        "company_name": "…", "format": " | ".join(formats or T.BUILTIN), "industry": "manufacturing",
         "industry_evidence": "sale of precision parts; raw materials and consumables used",
         "currency": "SGD", "unit": "thousands", "basis": "Group (consolidated)",
         "income_statement": {"page_numbers": [7], "periods": [
@@ -425,7 +461,7 @@ def _validate(data: dict, formats: dict) -> list[str]:
     problems = []
     if not isinstance(data, dict):
         return ["extraction must be a JSON object"]
-    fmt = data.get("format") if data.get("format") in formats else "general"
+    fmt = data.get("format") if data.get("format") in formats else ("general" if "general" in formats else next(iter(formats)))
     if data.get("unit") and data["unit"] not in extractor.UNIT_FACTORS:
         problems.append(f"unit must be one of {list(extractor.UNIT_FACTORS)}")
     if data.get("industry") and data["industry"] not in industries.ids():
@@ -489,22 +525,34 @@ def _sign(payload: str) -> str:
     return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()[:32]
 
 
-def download_link(ctx: Context, normalised: dict, meta: dict) -> str:
-    """A link that rebuilds the workbook when opened: the figures travel in the link itself."""
+def download_link(ctx: Context, normalised: dict, meta: dict, formats: dict | None = None) -> str:
+    """A link that rebuilds the workbook when opened: the figures travel in the link itself (and the user's
+    standard, when the filing is written in one)."""
     small = {st: {k: b[k] for k in ("periods", "values", "labels", "format", "step", "cogs_basis") if k in b}
              for st, b in normalised.items()}
     keep = ("company_name", "stock_code", "filing", "announcement_url", "currency", "unit", "basis", "format",
             "notes", "source_pdf", "pages", "model", "verdict", "presentation", "industry")
-    raw = json.dumps({"n": small, "m": {k: meta.get(k) for k in keep if meta.get(k)}}, separators=(",", ":"))
+    payload = {"n": small, "m": {k: meta.get(k) for k in keep if meta.get(k)}}
+    fid = meta.get("format") or (normalised.get("income_statement") or {}).get("format")
+    if formats and fid in formats and fid not in T.BUILTIN:
+        from . import standards
+        payload["f"] = standards._compact(T.to_json(formats[fid], hints=False))
+    raw = json.dumps(payload, separators=(",", ":"))
     d = base64.urlsafe_b64encode(zlib.compress(raw.encode(), 9)).decode().rstrip("=")
     return f"{ctx.base_url}/api/download?" + urlencode({"op": "download", "d": d, "s": _sign(d)})
 
 
-def decode_download(d: str, s: str) -> tuple[dict, dict]:
+def decode_download(d: str, s: str) -> tuple[dict, dict, dict | None]:
+    """(normalised, meta, formats): formats is the user's standard when the link carries one, else None."""
     if not hmac.compare_digest(_sign(d), s or ""):
         raise PermissionError("This download link is not valid for this app (the app password changed?).")
     raw = json.loads(zlib.decompress(base64.urlsafe_b64decode(d + "=" * (-len(d) % 4))))
-    return raw["n"], raw.get("m") or {}
+    formats = None
+    if raw.get("f"):
+        from . import standards
+        fmt = T.check_format(standards._expand(raw["f"]))
+        formats = {fmt["id"]: fmt}
+    return raw["n"], raw.get("m") or {}, formats
 
 
 def results_text(ctx: Context, normalised: dict, meta: dict, formats: dict, header: list[str]) -> dict:
@@ -514,7 +562,7 @@ def results_text(ctx: Context, normalised: dict, meta: dict, formats: dict, head
     meta = {**meta, "verdict": verdict}
     summary = run_checks(merge_records([], normalised, meta))
     counts = {s: sum(c["status"] == s for c in summary) for s in ("PASS", "FAIL", "derived", "n/a")}
-    link = download_link(ctx, normalised, meta)
+    link = download_link(ctx, normalised, meta, formats)
     basis = (normalised.get("income_statement") or {}).get("cogs_basis") or {}
     if basis:
         header = [*header, f"Industry: {basis.get('industry_name')}" + (f" ({basis['evidence']})" if basis.get("evidence") else ""),
@@ -563,7 +611,8 @@ def submit_tool(args: dict, ctx: Context) -> dict:
             data = json.loads(data)
         except ValueError:
             raise ToolError("extraction must be a JSON object")
-    formats = T.BUILTIN
+    formats, std_note = standard_formats(args, args.get("stock_code", ""), args.get("company_name") or
+                                         (data.get("company_name", "") if isinstance(data, dict) else ""))
     problems = _validate(data, formats)
     if problems:
         raise ToolError("Fix these and submit again:\n- " + "\n- ".join(problems[:30]))
@@ -583,9 +632,15 @@ def submit_tool(args: dict, ctx: Context) -> dict:
     meta["verdict"] = checks.verdict(normalised)
     meta["cogs_basis"] = normalised["income_statement"].get("cogs_basis")
     meta["industry"] = (meta["cogs_basis"] or {}).get("industry_name", "")
-    head = [f"{meta['company_name'] or 'Filing'} — {meta['format']} format, {meta['currency']} "
+    head = [f"{meta['company_name'] or 'Filing'} — {_format_name(meta['format'], formats)}, {meta['currency']} "
             f"(read in {meta['unit'] or extractor.DEFAULT_UNIT}, shown in '000), basis: {meta['basis'] or '?'}"]
+    if std_note:
+        head.append(std_note)
     return results_text(ctx, normalised, meta, formats, head)
+
+
+def _format_name(fid: str, formats: dict) -> str:
+    return f"your standard “{formats[fid]['name']}”" if fid in formats and fid not in T.BUILTIN else f"{fid} format"
 
 
 def extract_tool(args: dict, ctx: Context) -> dict:
@@ -602,16 +657,19 @@ def extract_tool(args: dict, ctx: Context) -> dict:
                         "as_images=true and read the statements yourself, then submit_statements.")
     meta = {"company_name": args.get("company_name", ""), "stock_code": args.get("stock_code", ""),
             "filing": args.get("filing", ""), "announcement_url": args.get("announcement_url") or used_url}
+    formats, std_note = standard_formats(args, meta["stock_code"], meta["company_name"])
     res = process_pdf(pdf, scan=scan, pages=pages, meta=meta, cache_dir=ctx.work, deadline=started + 280,
-                      formats=T.BUILTIN, cogs=cogs_rules(args, meta["stock_code"], meta["company_name"]))
+                      formats=formats, cogs=cogs_rules(args, meta["stock_code"], meta["company_name"]))
     if not res.normalised:
         raise ToolError("No statement pages found; call open_filing to look at the pages and pass pages=[...].")
     head = _scan_summary(pdf, scan, used_url, names) + [
-        f"Read by {res.meta.get('model')} from pages {res.meta.get('pages')} — {res.meta.get('format')} format, "
+        f"Read by {res.meta.get('model')} from pages {res.meta.get('pages')} — {_format_name(res.meta.get('format'), formats)}, "
         f"{res.meta.get('currency')}, basis: {res.meta.get('basis')}"]
+    if std_note:
+        head.append(std_note)
     if res.meta.get("notes"):
         head.append(f"Notes: {res.meta['notes']}")
-    return results_text(ctx, res.normalised, res.meta, T.BUILTIN, head)
+    return results_text(ctx, res.normalised, res.meta, formats, head)
 
 
 def connector_url(base_url: str, password: str = "") -> str:
