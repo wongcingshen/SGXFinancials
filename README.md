@@ -122,8 +122,17 @@ it against the figures. Without an AI key the program's own reading is used. Che
 **Save**: standards are kept in this browser, a company has one standard (the latest it was uploaded
 with), and a filing of a listed company is sent with its standard, so it is read into exactly those lines
 and written in that unit, order and sign convention. Figures are still kept in '000 with costs negative
-inside the workbook (and the Checks sheet stays in '000), so tie-outs and merging work as before. The
-Claude connector still uses the built-in formats.
+inside the workbook (and the Checks sheet stays in '000), so tie-outs and merging work as before.
+
+**In Claude too.** The connector can't see your browser, so a standard travels as a **token** (`sgxstd1.…`:
+the standard compacted and compressed, with the companies it is for; `/api/standards_token` makes them).
+The Claude buttons on a filing put its company's token in the message, and **My standards → Copy for
+Claude** copies one token with all your standards: paste it into a Claude project's instructions (or a
+chat) to use them in chats you start yourself. Claude passes it as `standard` to `open_filing`,
+`extract_filing` and `submit_statements` (with the stock code; the server picks the company's standard), so
+the statements are read into your lines, and the Excel link carries the standard and builds the workbook in
+your unit, column order and signs. A company the token doesn't list keeps the built-in layout, and Claude is
+told so; a token copied wrongly is refused rather than half-used.
 
 **Banks** get their own layout: Gross Income, Gross Expense, Gross Profit, then Interest Income,
 Interest Expense, Net Interest Income, Fee & Commission Income, Other Non-Interest Income, Operating
@@ -277,6 +286,9 @@ and still shows its pages with `as_images=true`.
 | `open_filing` | Downloads the filing, keyword-scans it (no AI); picture statements → page images + rules |
 | `submit_statements` | Claude's JSON → checks, figures table, Excel link (re-read prompts for failing checks) |
 | `extract_filing` | The web app's own pipeline with the server's AI |
+
+Each of `open_filing`, `extract_filing` and `submit_statements` also takes `standard`, your standard token
+(see *Your own standards*).
 
 Nothing is stored: the Excel link (`/api/download`) carries the figures compressed and signed with
 `APP_PASSWORD`, and the workbook is built when it is opened. The endpoint is stateless MCP

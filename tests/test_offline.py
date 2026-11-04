@@ -1618,6 +1618,91 @@ def test_standards_learnt_from_the_users_workbooks():
     assert "SGD m" in ws["A2"].value
 
 
+def test_connector_uses_the_users_standards():
+    """The Claude connector writes in the user's standard when the call carries its token: one company's
+    (the web app's message) or a pack of them all (pasted by the user)."""
+    import copy
+    import importlib.util
+    import os
+    from urllib.parse import urlparse
+    from sgx_fin import mcp_server, standards as S
+
+    found = S.learn("listing.xlsx", listing_workbook(), use_ai=False)["standards"]
+    one = found[0]  # A11, B22, C33: millions, oldest first, costs positive
+    spec = importlib.util.spec_from_file_location("vercel_app_std_mcp", HERE.parent / "api" / "index.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    client = mod.app.test_client()
+    old_pw, old_load = os.environ.get("APP_PASSWORD"), mcp_server.load_filing
+    os.environ.pop("APP_PASSWORD", None)
+    pdf = HERE / "sample_results.pdf"
+    mcp_server.load_filing = lambda args, ctx: (pdf, scan_pdf(pdf), None, [pdf.name])
+    try:
+        # The web app gets the tokens from the server: each standard's own, and a pack with the companies.
+        r = client.post("/api/standards_token?op=standards_token",
+                        json={"standards": [{"format": x["format"], "companies": x["companies"]} for x in found]})
+        tokens, pack = r.get_json()["tokens"], r.get_json()["pack"]
+        assert tokens[0] == one["token"] and pack.startswith("sgxstd1.")
+
+        def call(name, args):
+            msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}
+            return client.post("/api/mcp?op=mcp", json=msg).get_json()["result"]
+
+        props = {t["name"]: t["inputSchema"]["properties"] for t in mcp_server.TOOLS}
+        assert all("standard" in props[n] for n in ("open_filing", "submit_statements", "extract_filing"))
+        assert "sgxstd1." in mcp_server.INSTRUCTIONS
+        url = "https://links.sgx.com/1.0.0/corporate-announcements/TEST"
+        # Read into the user's lines: the rules name that format only.
+        res = call("open_filing", {"announcement_url": url, "as_images": True, "standard": pack, "stock_code": "A11"})
+        text = res["content"][0]["text"]
+        assert f"# format {one['id']}" in text and "# format general" not in text, text[-3000:]
+        assert "Written in your standard" in text and "millions, oldest period first" in text
+
+        data = copy.deepcopy(FAKE)
+        data["format"] = one["id"]
+        for st in ("income_statement", "balance_sheet", "cash_flow"):
+            for i, p in enumerate(data[st]["periods"], 1):
+                p["col"] = i
+            for row in data[st]["rows"]:
+                row["cells"] = [{"col": i, "value": v} for i, v in enumerate(row.pop("values"), 1) if v is not None]
+        # minority / owners lines aren't in this user's standard: the format's own keys only
+        bad = call("submit_statements", {"extraction": data, "standard": pack, "stock_code": "A11"})
+        assert bad.get("isError") and "is not a key of the" in bad["content"][0]["text"]
+        keys = {r.get("key") for st in one["format"]["statements"].values() for r in st["rows"]}
+        for st in ("income_statement", "balance_sheet", "cash_flow"):
+            data[st]["rows"] = [r for r in data[st]["rows"] if r["key"] in keys]
+        res = call("submit_statements", {"extraction": data, "standard": pack, "stock_code": "A11", "company_name": "Alpha Ltd"})
+        text = res["content"][0]["text"]
+        assert not res.get("isError") and "your standard “Standard 1”" in text, text
+        link = text.split("Excel workbook")[1].split(": ", 1)[1].split()[0]
+        u = urlparse(link)
+        ws = load_workbook(io.BytesIO(client.get(f"{u.path}?{u.query}").data))["Income Statement"]
+        assert "SGD m" in ws["A2"].value and [c.value for c in ws[4]][1:] == ["6M Jun 2025", "6M Jun 2026"]
+        got = {row[0].value: [c.value for c in row[1:]] for row in ws.iter_rows(min_row=8) if row[0].value}
+        assert got["Cost of sales"] == [72.1, 80.412], got  # costs positive, the user's labels
+
+        # One company's token (from the web app's message) needs no stock code.
+        res = call("submit_statements", {"extraction": data, "standard": one["token"]})
+        assert "your standard" in res["content"][0]["text"]
+        # A company the pack doesn't list keeps the built-in layout, and Claude is told so.
+        plain = copy.deepcopy(FAKE)
+        plain["format"] = "general"
+        for st in ("income_statement", "balance_sheet", "cash_flow"):
+            for i, p in enumerate(plain[st]["periods"], 1):
+                p["col"] = i
+            for row in plain[st]["rows"]:
+                row["cells"] = [{"col": i, "value": v} for i, v in enumerate(row.pop("values"), 1) if v is not None]
+        text = call("submit_statements", {"extraction": plain, "standard": pack, "stock_code": "Z74"})["content"][0]["text"]
+        assert "don't include Z74" in text and "general format" in text
+        # A token copied wrongly is refused with what to do.
+        res = call("submit_statements", {"extraction": plain, "standard": pack[:-12]})
+        assert res.get("isError") and "Copy the token again exactly" in res["content"][0]["text"]
+    finally:
+        mcp_server.load_filing = old_load
+        if old_pw is not None:
+            os.environ["APP_PASSWORD"] = old_pw
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

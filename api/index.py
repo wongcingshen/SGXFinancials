@@ -180,6 +180,21 @@ def _formats_for(f) -> dict:
     return T.resolve(json.loads(f.get("formats") or "[]"))
 
 
+@api("standards_token", "POST")
+def standards_token():
+    """Tokens for the Claude connector: one per standard sent (for any company), and one with them all and
+    their companies (the user pastes it into Claude)."""
+    from sgx_fin import standards, template as T
+    body = request.get_json(silent=True) or {}
+    items = body.get("standards") or []
+    try:
+        checked = [(T.to_json(standards.chosen(it.get("format")), hints=False), it.get("companies") or []) for it in items]
+    except (ValueError, TypeError, AttributeError) as e:
+        return jsonify(error=f"A saved standard is invalid: {e}"), 400
+    return jsonify(tokens=[standards.encode([(f, [])]) for f, _ in checked],
+                   pack=standards.encode(checked) if checked else "")
+
+
 @api("release_date", "GET")
 def release_date():
     """Date, period and timing of a results release notice (no AI): from the announcement page's
@@ -409,12 +424,12 @@ def mcp():
 def download():
     from sgx_fin import mcp_server
     try:
-        normalised, meta = mcp_server.decode_download(request.args.get("d", ""), request.args.get("s", ""))
+        normalised, meta, formats = mcp_server.decode_download(request.args.get("d", ""), request.args.get("s", ""))
     except PermissionError as e:
         return jsonify(error=str(e)), 403
     except Exception:
         return jsonify(error="This download link is damaged; ask Claude for the link again."), 400
-    data, _ = workbook_bytes(None, normalised, meta)
+    data, _ = workbook_bytes(None, normalised, meta, formats)  # in the user's standard when the link carries one
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", meta.get("stock_code") or meta.get("company_name") or "").strip("_") or "financials"
     return Response(data, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
