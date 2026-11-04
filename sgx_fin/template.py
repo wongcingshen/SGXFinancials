@@ -19,6 +19,12 @@ Row fields
   hint   synonyms / guidance passed to the AI to map the company's own wording
   formula  optional "A + B - C" over other rows' labels (or keys) of the same statement, and plain
          numbers: the line is calculated when the filing doesn't print it (e.g. EBITDA)
+  sign   -1 for a cost or outflow the user's own workbooks show as a positive number: the figures
+         are kept with this app's signs (costs negative) and only flipped when written to Excel
+
+A format learnt from the user's workbook (sgx_fin/standards.py) also carries
+  conventions  {"unit": "units" | "thousands" | "millions" | "billions", "latest_first": bool}:
+               the unit and column order the workbook is written in
 """
 
 from __future__ import annotations
@@ -49,6 +55,7 @@ class Row:
     kind: str = "item"
     hint: str = ""
     formula: str = ""
+    sign: int = 1
 
 
 # ------------------------------------------------------------------ loading and checking formats
@@ -152,7 +159,8 @@ def _read_rows(statement: str, rows: list, prefer: dict | None = None) -> list[R
         hint = str(r.get("hint") or "") or preferred_hints.get(key) or _builtin_hint(statement, key)
         if formula and not r.get("hint"):
             hint = f"the printed figure if shown; otherwise calculated by the program as {formula}"
-        out.append(Row(key, label, kind, hint, formula))
+        sign = -1 if r.get("sign") in (-1, "-1") and kind != "header" else 1
+        out.append(Row(key, label, kind, hint, formula, sign))
     return out
 
 
@@ -170,8 +178,39 @@ def check_format(raw: dict, prefer: dict | None = None) -> dict:
         statements[st] = (str(block.get("title") or STATEMENT_TITLES[st]), rows)
     if not any(r.kind != "header" for _, rows in statements.values() for r in rows):
         raise ValueError(f"format {fid} has no rows")
-    return {"id": fid, "name": str(raw.get("name") or fid.title()),
-            "applies_to": str(raw.get("applies_to") or ""), "statements": statements}
+    out = {"id": fid, "name": str(raw.get("name") or fid.title()),
+           "applies_to": str(raw.get("applies_to") or ""), "statements": statements}
+    conv = clean_conventions(raw.get("conventions"))
+    if conv:
+        out["conventions"] = conv
+    return out
+
+
+UNIT_NAMES = ("units", "thousands", "millions", "billions")
+UNIT_SIZES = {"units": 1, "thousands": 1_000, "millions": 1_000_000, "billions": 1_000_000_000}
+UNIT_LABELS = {"units": "", "thousands": "'000", "millions": "m", "billions": "bn"}
+
+
+def clean_conventions(raw) -> dict:
+    """A format's unit and column order, keeping only what is understood."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    if raw.get("unit") in UNIT_NAMES:
+        out["unit"] = raw["unit"]
+    if isinstance(raw.get("latest_first"), bool):
+        out["latest_first"] = raw["latest_first"]
+    return out
+
+
+def conventions(fmt_id: str | None, formats: dict | None = None) -> dict:
+    """Unit, unit label, column order of the format a workbook is written in (the app's defaults
+    for the built-in formats)."""
+    fmt = (formats or BUILTIN).get(fmt_id or "") or {}
+    conv = fmt.get("conventions") or {}
+    unit = conv.get("unit") or "thousands"
+    return {"unit": unit, "size": UNIT_SIZES[unit], "label": UNIT_LABELS[unit],
+            "latest_first": conv.get("latest_first", LATEST_FIRST)}
 
 
 def _load_builtin() -> dict[str, dict]:
@@ -226,11 +265,15 @@ def resolve(custom: list | None = None) -> dict[str, dict]:
     return out
 
 
-def to_json(fmt: dict) -> dict:
-    return {"id": fmt["id"], "name": fmt["name"], "applies_to": fmt["applies_to"], "statements": {
+def to_json(fmt: dict, hints: bool = True) -> dict:
+    out = {"id": fmt["id"], "name": fmt["name"], "applies_to": fmt["applies_to"], "statements": {
         st: {"title": title, "rows": [{k: v for k, v in (("key", r.key), ("label", r.label), ("kind", r.kind),
-                                                          ("hint", r.hint), ("formula", r.formula)) if v} for r in rows]}
+                                                          ("hint", r.hint if hints else ""), ("formula", r.formula),
+                                                          ("sign", -1 if r.sign == -1 else 0)) if v} for r in rows]}
         for st, (title, rows) in fmt["statements"].items()}}
+    if fmt.get("conventions"):
+        out["conventions"] = dict(fmt["conventions"])
+    return out
 
 
 # ------------------------------------------------------------------ formulas

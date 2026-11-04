@@ -8,6 +8,8 @@ Routes (the operation is also accepted as ?op=health|screen|process on any path)
   GET  /api/download?op=download&d=&s= a workbook from a connector result's signed link
   GET  /api/industries                the built-in industries and their cost of goods sold rules
   POST /api/recompute                 a filing's COGS from the lines the user ticked (no AI), new workbook
+  POST /api/learn_standard            the statement standard(s) of a finished workbook the user uploads (.xlsx/.csv),
+                                      and which companies use each one
 On Vercel, /api/browse (api/browse.mjs) runs the headless browser for screening and attachments.
 
 Environment variables (Vercel > Project > Settings > Environment Variables)
@@ -153,6 +155,31 @@ def parse_format():
     return jsonify(format=fmt, marked=F.to_marked(fmt), problems=T.formula_problems(T.check_format(fmt)))
 
 
+@api("learn_standard", "POST")
+def learn_standard():
+    """Read a finished workbook (one company's, or a whole listing) and return each standard it uses:
+    lines, unit, column order, signs and sums, and the companies laid out that way."""
+    from sgx_fin import standards
+    up = request.files.get("file")
+    if not up or not up.filename:
+        return jsonify(error="Upload an Excel (.xlsx) or CSV file"), 400
+    try:
+        res = standards.learn(up.filename, up.read(), deadline=time.monotonic() + 270)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
+    return jsonify(file=up.filename, ai=extractor.provider_label() if res["model"] else None, **res)
+
+
+def _formats_for(f) -> dict:
+    """The formats a filing may be written in: the user's standard for its company alone when the web
+    app sends one (so the filing comes out in that layout), else the built-in ones (and any custom)."""
+    from sgx_fin import standards, template as T
+    std = standards.chosen(f.get("standard"))
+    if std:
+        return {std["id"]: std}
+    return T.resolve(json.loads(f.get("formats") or "[]"))
+
+
 @api("release_date", "GET")
 def release_date():
     """Date, period and timing of a results release notice (no AI): from the announcement page's
@@ -220,11 +247,11 @@ def process():
             "filing": f.get("title", "")}
     WORK.mkdir(parents=True, exist_ok=True)
     client = SGXClient()
-    from sgx_fin import industries, template as T
-    try:  # formats imported / edited in the web app replace or add to the built-in ones
-        formats = T.resolve(json.loads(f.get("formats") or "[]"))
+    from sgx_fin import industries
+    try:  # the user's standard for this company, learnt from their own workbook
+        formats = _formats_for(f)
     except (ValueError, TypeError) as e:
-        return jsonify(error=f"A saved statement format is invalid: {e}"), 400
+        return jsonify(error=f"Your saved standard for this company is invalid: {e}"), 400
     try:  # the user's cost of goods sold preferences: industry rules and company rules
         cogs = industries.for_filing(json.loads(f.get("cogs_rules") or "{}"), meta["stock_code"], meta["company_name"])
     except (ValueError, TypeError) as e:
@@ -328,12 +355,12 @@ def list_industries():
 def recompute():
     """A filing's cost of goods sold from the lines the user ticked: added up again (no AI), gross
     profit and the verdict worked out again, and the workbook rebuilt (merged into the one sent)."""
-    from sgx_fin import checks, template as T
+    from sgx_fin import checks
     f = request.form
     try:
         normalised, meta = json.loads(f.get("normalised") or "null"), json.loads(f.get("meta") or "null")
         picks = json.loads(f.get("in_cogs") or "null")
-        formats = T.resolve(json.loads(f.get("formats") or "[]"))
+        formats = _formats_for(f)
         if not isinstance(normalised, dict) or not isinstance(meta, dict):
             raise ValueError("send the extraction's normalised figures and meta")
         chosen = extractor.recompute_cogs(normalised, picks, formats)

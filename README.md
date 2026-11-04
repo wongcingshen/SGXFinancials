@@ -100,6 +100,31 @@ The workbook gets a **Transcription** sheet with the tables as read: corrected f
 per filing by the AI from each format's "used for" description. Built-in formats live in
 `formats/*.json` (General, Bank); edit or add a file there to change them for everyone.
 
+**Your own standards** (web app, **My standards** in the header). Upload a finished workbook of older
+results: one company's file, or a whole listing (one sheet per company, sheets such as "D05 Income
+Statement", or one table with a company / stock code column). The program (`sgx_fin/standards.py`) finds
+each company (stock code and name from the cells, sheet names or file name) and reads its income
+statement, balance sheet and cash flow lines in order with their figures. Companies laid out alike (80%
+of lines in common) become one **standard**: "Standard 1 for X and Y, Standard 2 for A, B and C". For
+each standard it records:
+
+| | How it is found |
+|---|---|
+| Lines, order, headings and totals | The file's own rows (bold = total, filled = heading); each line is matched to the app's line of the same meaning, so checks and derived lines still work |
+| Unit ('000, millions, billions) | The sheet's own words ("S$ million", "S$'000"), else the AI's judgement, else '000 |
+| Column order | The period headers (FY2023, FY2024 = oldest first) |
+| Sign convention | Costs and outflows (marked by the AI, or by their wording) that the file shows as positive are flipped when written |
+| Sums | Totals the AI says are sums of other lines ("Gross profit = Revenue - Cost of sales") become formulas, but only where the file's figures prove them |
+
+The AI (one request per file, for up to 8 standards) names each standard, says what kind of company it
+suits, matches lines the program can't, marks costs and outflows and proposes the sums; the program checks
+it against the figures. Without an AI key the program's own reading is used. Check the companies, then
+**Save**: standards are kept in this browser, a company has one standard (the latest it was uploaded
+with), and a filing of a listed company is sent with its standard, so it is read into exactly those lines
+and written in that unit, order and sign convention. Figures are still kept in '000 with costs negative
+inside the workbook (and the Checks sheet stays in '000), so tie-outs and merging work as before. The
+Claude connector still uses the built-in formats.
+
 **Banks** get their own layout: Gross Income, Gross Expense, Gross Profit, then Interest Income,
 Interest Expense, Net Interest Income, Fee & Commission Income, Other Non-Interest Income, Operating
 Expenses, Operating Profit before Allowances, Allowances, then PBT to EPS; and a balance sheet of Cash & Central Bank Balances,
@@ -169,7 +194,7 @@ filings. **Download my rules (JSON)** exports them; put the industries into `ind
 to make them everyone's default.
 
 Formats are loaded by **`sgx_fin/template.py`**; importing and the editable text form are in
-**`sgx_fin/formats.py`**. Industries and their COGS rules are in **`industries/cogs.json`**, loaded
+**`sgx_fin/formats.py`**, and standards learnt from your workbooks in **`sgx_fin/standards.py`**. Industries and their COGS rules are in **`industries/cogs.json`**, loaded
 by **`sgx_fin/industries.py`**.
 
 ## Web app
@@ -197,7 +222,8 @@ yellow, Fraunces + Outfit, rounded cards, one accent colour per company):
 - **Extract all** works through every card (two at a time) and becomes **Download all** (zip).
 - **Choose download folder** (Chrome / Edge): every workbook is saved straight into that folder,
   one file per company, and a new filing is merged into the company's file already there.
-- **Process a filing** (header): an SGX announcement/PDF link or a PDF upload.
+- **My standards** (header): upload results you already have in Excel or CSV, and each company's next
+  filings come out in the same layout (see *Your own standards* below).
 - **Settings**: app password, how hard the AI reads, and COGS rules.
 
 Preview it locally without SGX access or an API key:
@@ -340,7 +366,7 @@ SGX's terms of use apply to the data you retrieve; keep request volumes modest.
 ## Tests
 
 ```bash
-python tests/test_offline.py               # scanner, pictures, checks, schema, Excel merge
+python tests/test_offline.py               # scanner, pictures, checks, schema, Excel merge, standards
 python tests/accuracy.py 2V6B.xlsx          # score a workbook against tests/answers/ (Bank of Baroda by default)
 CHROME_PATH=/path/to/chrome node tests/browse_test.mjs   # browser scraper vs a stand-in SGX site
 NODE_PATH=$(npm root -g) node tests/make_sample_pdf.cjs   # regenerate the sample PDF (needs playwright)

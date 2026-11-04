@@ -449,3 +449,15 @@ details > summary::-webkit-details-marker { display: none; }
 .ask-bar span { display: block; height: 100%; background: var(--color-ember); transform-origin: left; animation: ask-drain linear forwards; }
 @keyframes ask-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @media (max-width: 560px) { .ask-pop { right: 16px; left: 16px; bottom: 16px; width: auto; } }
+
+/* My standards: layouts learnt from the user's own workbooks */
+.std-card { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 14px; background: var(--color-field); }
+.std-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 15px; }
+.std-head b { font-weight: 600; }
+.std-conv { display: flex; flex-wrap: wrap; gap: 6px; }
+.std-conv .tag { font-size: 11.5px; padding: 3px 8px; }
+.std-card .input.need { border-color: var(--color-ember-deep); }
+.std-lines { max-height: 260px; overflow: auto; white-space: pre; font-size: 12px; margin: 6px 0 0; }
+.drop.busy { opacity: .7; pointer-events: none; }
+#stdFound .form-row { gap: 8px; }
+.std-card .lbl { font-size: 13px; }

@@ -499,6 +499,8 @@ function formData(a, dryRun, pages, workbook, files) {
   for (const f of files || a.attachments || []) { fd.append("pdf_url", f.url); fd.append("pdf_name", f.name || ""); }
   const cogs = cogsPrefs();
   if (cogs.industries.length || cogs.companies.length) fd.append("cogs_rules", JSON.stringify(cogs));
+  const std = standardFor(a); // the user's own layout for this company
+  if (std) fd.append("standard", JSON.stringify(std.format));
   if (a.file) fd.append("pdf", a.file);
   fd.append("dry_run", dryRun ? "true" : "false");
   fd.append("effort", state.effort);
@@ -739,6 +741,12 @@ function cogsHtml(r, a) {
     </div>`;
 }
 
+// Which layout the workbook is in: the user's standard (its name and unit), the bank format, or the general one.
+function formatNote(id) {
+  const s = savedStandards().find((x) => x.id === id);
+  if (s) return ` · your standard “${esc(s.name)}” · ${esc(UNIT_TEXT[s.conventions?.unit] || "’000")}`;
+  return `${id === "bank" ? " · bank format" : ""} · '000`;
+}
 function resultHtml(r, canClaude, a = {}) {
   const pass = r.checks.filter((c) => c.status === "PASS").length;
   const fail = r.checks.filter((c) => c.status === "FAIL");
@@ -746,7 +754,7 @@ function resultHtml(r, canClaude, a = {}) {
   const ordered = [...fail, ...r.checks.filter((c) => c.status !== "FAIL")];
   return `${verdictHtml(r, canClaude)}<div>
       <p class="block-title">Extracted</p>
-      <div class="kv"><span><b>${esc(nameCase(r.meta.company_name))}</b></span><span>${esc(r.meta.currency)} · ${esc(r.meta.basis || "Group")}${r.meta.format === "bank" ? " · bank format" : ""} · '000</span>
+      <div class="kv"><span><b>${esc(nameCase(r.meta.company_name))}</b></span><span>${esc(r.meta.currency)} · ${esc(r.meta.basis || "Group")}${formatNote(r.meta.format)}</span>
         <span>pages ${esc(r.meta.pages)}</span><span>${r.usage?.input_tokens ? `${r.usage.input_tokens.toLocaleString()} in / ${(r.usage.output_tokens || 0).toLocaleString()} out tokens` : "from cache, no tokens used"}</span>
         <span>read by ${esc(r.meta.model || "")}</span>${r.timings ? `<span>download &amp; scan ${r.timings.download_and_scan} s · AI ${r.timings.ai} s</span>` : ""}</div>
     </div>
@@ -829,45 +837,138 @@ document.addEventListener("click", (e) => {
   if (e.target.matches("dialog.sheet")) e.target.close(); // backdrop click
 });
 
-// ------------------------------------------------------------------ direct filing
-function setDrop(dropSel, nameSel, file, fallback) {
-  $(nameSel).textContent = file ? `${file.name} · ${(file.size / 1e6).toFixed(1)} MB` : fallback;
+// ------------------------------------------------------------------ my standards
+// A finished workbook (one company's, or a whole listing) is read on the server: each standard is a
+// layout with its unit, column order, signs and sums, and the companies laid out that way. Standards are
+// kept in this browser; a filing of one of those companies is sent with its standard and comes out in it.
+let foundStandards = []; // read from the files just uploaded, not saved yet
+function savedStandards() {
+  try { const s = JSON.parse(store.get("sgxf-standards", "[]")); return Array.isArray(s) ? s : []; } catch { return []; }
 }
-function wireDrop(dropSel, inputSel, onFile) {
-  const drop = $(dropSel), input = $(inputSel);
-  ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("drag"); }));
-  ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, () => drop.classList.remove("drag")));
-  drop.addEventListener("drop", (e) => { e.preventDefault(); if (e.dataTransfer.files[0]) onFile(e.dataTransfer.files[0]); });
-  input.addEventListener("change", () => onFile(input.files[0]));
+function saveStandards(list) {
+  try { localStorage.setItem("sgxf-standards", JSON.stringify(list)); }
+  catch { toast("This browser has no room to keep that many standards. Remove some first."); return false; }
+  renderStandards();
+  return true;
 }
-
-let directFile = null;
-wireDrop("#pdfDrop", "#pdfFile", (f) => {
-  if (f && f.size > MAX_UPLOAD) { toast("That PDF is over 4 MB. Use its SGX link instead."); return; }
-  directFile = f || null;
-  setDrop("#pdfDrop", "#pdfName", directFile, "Choose or drop a PDF");
+// "DBS Group Holdings Ltd" and "DBS GROUP HOLDINGS LIMITED" are the same company.
+const CO_SUFFIX = /\b(LIMITED|LTD|PLC|INC|INCORPORATED|CORPORATION|CORP|BHD|BERHAD|TBK|PTE|CO|COMPANY|HOLDINGS?|GROUP|THE|REIT|TRUST)\b/g;
+const coKey = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9 ]+/g, " ").replace(CO_SUFFIX, " ").replace(/\s+/g, " ").trim();
+function sameCompany(c, code, name) {
+  code = String(code || "").toUpperCase();
+  if (c.code && code) return c.code.toUpperCase() === code;
+  const x = coKey(c.name), y = coKey(name);
+  return x.length >= 2 && y.length >= 2 && (x === y || y.startsWith(`${x} `) || x.startsWith(`${y} `));
+}
+const standardFor = (a) => savedStandards().find((s) => (s.companies || []).some((c) => sameCompany(c, a.stock_code, a.issuer)));
+const coText = (c) => c.code || c.name;
+const IS_CODE = /^[A-Z0-9]{2,5}$/;
+function parseCompanies(text, known = []) {
+  return text.split(/[,;\n]/).map((t) => t.trim()).filter(Boolean).map((t) => known.find((c) => coText(c).toUpperCase() === t.toUpperCase())
+    || (IS_CODE.test(t.toUpperCase()) && /\d/.test(t) ? { code: t.toUpperCase(), name: "" } : { code: "", name: t }));
+}
+const UNIT_TEXT = { units: "Units", thousands: "’000", millions: "Millions", billions: "Billions" };
+function convChips(c) {
+  return `<span class="tag na">${esc(UNIT_TEXT[c.unit] || "’000")}${c.unit_found === false ? " (assumed)" : ""}</span>
+    <span class="tag na">${c.latest_first ? "Latest period first" : "Oldest period first"}</span>
+    <span class="tag na">${c.expenses === "positive" ? "Costs shown positive" : c.expenses === "mixed" ? "Some costs shown positive" : "Costs shown negative"}</span>`;
+}
+function stdCard(s, k, saved) {
+  const lines = Object.values(s.rows || {}).reduce((x, y) => x + y, 0);
+  const list = (s.companies || []).map(coText).join(", ");
+  return `<div class="std-card">
+    <div class="std-head"><b>${saved ? `Standard ${k + 1} · ` : ""}${esc(s.name)}</b><span class="tag pass">${esc(s.company_type || "general")}</span>
+      ${saved ? `<button type="button" class="link-btn" data-std-del="${k}" style="margin-left:auto;color:var(--trip-lacquer)">Remove</button>` : ""}</div>
+    <small class="muted">${esc(s.applies_to || "")}</small>
+    <div class="std-conv">${convChips(s.conventions || {})}
+      ${lines ? `<span class="tag na">${lines} lines${s.mapped != null ? ` · ${s.mapped} matched to the app’s` : ""}</span>` : ""}
+      ${s.formulas?.length ? `<span class="tag na" title="${esc(s.formulas.join("\n"))}">${s.formulas.length} sum${s.formulas.length === 1 ? "" : "s"} worked out</span>` : ""}</div>
+    ${s.missing?.length ? `<p class="help">Not in the file: ${esc(s.missing.join(", "))}. The built-in lines are used for ${s.missing.length === 1 ? "it" : "them"}.</p>` : ""}
+    ${s.notes ? `<p class="help">${esc(s.notes)}</p>` : ""}
+    <label class="lbl" for="std-co-${saved ? "s" : "f"}${k}">For ${s.companies?.length > 1 ? `${s.companies.length} companies` : "company"} (stock codes or names, comma-separated)</label>
+    <input class="input${list ? "" : " need"}" id="std-co-${saved ? "s" : "f"}${k}" data-std-co="${k}" data-saved="${saved ? 1 : 0}" value="${esc(list)}" placeholder="Which company? e.g. D05 or DBS Group">
+    <details><summary>Lines</summary><pre class="mono std-lines">${esc(s.marked || "")}</pre></details>
+  </div>`;
+}
+function renderStandards() {
+  const saved = savedStandards();
+  $("#stdList").innerHTML = saved.map((s, k) => stdCard(s, k, true)).join("")
+    || `<p class="muted" style="margin:0;font-size:13px">None yet. Upload a workbook above.</p>`;
+  $("#stdFound").innerHTML = foundStandards.length ? `<div class="form-row"><span class="lbl">Found in your file${foundStandards.length > 1 ? "s" : ""}: ${foundStandards.length} standard${foundStandards.length === 1 ? "" : "s"}</span>
+    ${foundStandards.map((s, k) => stdCard(s, k, false)).join("")}</div>` : "";
+  $("#stdFoot").hidden = !foundStandards.length;
+}
+async function learnFiles(files) {
+  files = [...files].filter(Boolean);
+  if (!files.length) return;
+  const notes = [];
+  for (const [n, f] of files.entries()) {
+    if (!/\.(xlsx|xlsm|csv)$/i.test(f.name)) { notes.push(`${f.name}: not an Excel or CSV file`); continue; }
+    if (f.size > MAX_UPLOAD) { notes.push(`${f.name}: over 4 MB, split it into smaller files`); continue; }
+    $("#stdName").textContent = `Reading ${files.length > 1 ? `${n + 1} of ${files.length}: ` : ""}${f.name}…`;
+    $("#stdDrop").classList.add("busy");
+    const fd = new FormData();
+    fd.append("file", f);
+    try {
+      const res = await api("/api/learn_standard?op=learn_standard", { method: "POST", body: fd, timeoutMs: 300_000 });
+      for (const s of res.standards) {
+        const same = foundStandards.find((x) => x.id === s.id);
+        if (same) same.companies = [...same.companies, ...s.companies.filter((c) => !same.companies.some((d) => coText(d) && coText(d) === coText(c)))];
+        else foundStandards.push(s);
+      }
+      if (res.ai_error) notes.push(`${f.name}: ${state.ai} couldn’t review it (${res.ai_error}); the program’s own reading is shown`);
+      else if (!res.ai) notes.push(`${f.name}: read without ${state.ai} (no AI key on the server)`);
+    } catch (e) {
+      notes.push(`${f.name}: ${e.message}`);
+    }
+  }
+  $("#stdDrop").classList.remove("busy");
+  $("#stdName").textContent = "Choose or drop .xlsx or .csv files";
+  renderStandards();
+  if (notes.length) toast(notes.join(" · "));
+  else toast(`${foundStandards.length} standard${foundStandards.length === 1 ? "" : "s"} found. Check the companies, then save.`);
+}
+function keepStandards() {
+  let saved = savedStandards();
+  const kept = foundStandards.filter((s) => s.companies.length);
+  if (!kept.length) return toast("Say which company each standard is for first.");
+  for (const s of kept) {
+    // A company has one standard: the newest one it was uploaded with.
+    saved = saved.map((x) => ({ ...x, companies: (x.companies || []).filter((c) => !s.companies.some((d) => sameCompany(d, c.code, c.name) || sameCompany(c, d.code, d.name))) }));
+    const same = saved.find((x) => x.id === s.id);
+    const { source, ...rest } = s;
+    const companies = s.companies.map(({ name, code }) => ({ name, code }));
+    if (same) Object.assign(same, rest, { companies: [...same.companies, ...companies] });
+    else saved.push({ ...rest, companies, saved_at: new Date().toISOString() });
+  }
+  saved = saved.filter((x) => x.companies.length);
+  const skipped = foundStandards.length - kept.length;
+  foundStandards = [];
+  if (saveStandards(saved)) toast(`Saved.${skipped ? ` ${skipped} without a company left out.` : ""} These companies’ next filings come out in their standard.`);
+}
+$("#stdFile").addEventListener("change", (e) => { learnFiles(e.target.files); e.target.value = ""; });
+["dragenter", "dragover"].forEach((t) => $("#stdDrop").addEventListener(t, (e) => { e.preventDefault(); $("#stdDrop").classList.add("drag"); }));
+["dragleave", "drop"].forEach((t) => $("#stdDrop").addEventListener(t, () => $("#stdDrop").classList.remove("drag")));
+$("#stdDrop").addEventListener("drop", (e) => { e.preventDefault(); learnFiles(e.dataTransfer.files); });
+$("#stdSave").addEventListener("click", keepStandards);
+$("#stdSheet").addEventListener("change", (e) => {
+  const input = e.target.closest("[data-std-co]");
+  if (!input) return;
+  const k = +input.dataset.stdCo;
+  if (input.dataset.saved === "1") {
+    const saved = savedStandards();
+    saved[k].companies = parseCompanies(input.value, saved[k].companies);
+    saveStandards(saved.filter((x) => x.companies.length));
+  } else {
+    foundStandards[k].companies = parseCompanies(input.value, foundStandards[k].companies);
+    input.classList.toggle("need", !foundStandards[k].companies.length);
+  }
 });
-
-function directJob() {
-  const url = $("#directUrl").value.trim();
-  const job = { issuer: $("#dName").value.trim(), stock_code: $("#dCode").value.trim().toUpperCase(), pages: $("#dPages").value.replace(/\s/g, "") };
-  if (directFile) { job.file = directFile; job.fileName = directFile.name; job.title = directFile.name; }
-  else if (url) {
-    if (!/^https:\/\/([a-z0-9-]+\.)*sgx\.com\//i.test(url)) { toast("Use an https://…sgx.com link, or upload the PDF."); return null; }
-    job[/\.pdf($|\?)/i.test(url) || /fileopen/i.test(url) ? "pdf_url" : "announcement_url"] = url;
-  } else { toast("Add an SGX link or a PDF first."); return null; }
-  if (job.pages && !/^\d+(,\d+)*$/.test(job.pages)) { toast("Enter page numbers like 7,8,9"); return null; }
-  return job;
-}
-$("#dExtract").addEventListener("click", () => {
-  const j = directJob();
-  if (!j) return;
-  $("#directSheet").close();
-  const item = { ...j, url: j.announcement_url || j.pdf_url || "", key: j.announcement_url || j.pdf_url || `file:${j.fileName}:${Date.now()}`,
-    attachments: j.pdf_url ? [{ name: "PDF", url: j.pdf_url }] : undefined, job: { status: "idle" } };
-  state.items.unshift(item);
-  renderCards();
-  extract(item);
+$("#stdSheet").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-std-del]");
+  if (!b) return;
+  saveStandards(savedStandards().filter((_, k) => k !== +b.dataset.stdDel));
+  toast("Removed. Its companies go back to the built-in layout.");
 });
 
 // ------------------------------------------------------------------ settings
@@ -1024,6 +1125,8 @@ async function recalcCogs(a) {
   fd.append("normalised", JSON.stringify(r.normalised));
   fd.append("meta", JSON.stringify(r.meta));
   fd.append("in_cogs", JSON.stringify(pickedLines()));
+  const std = standardFor(a);
+  if (std) fd.append("standard", JSON.stringify(std.format));
   const existing = state.folderOk && j.saved ? await readFromFolder(j.filename) : j.blob;
   if (existing) fd.append("workbook", existing, j.filename);
   try {
@@ -1059,7 +1162,7 @@ function saveCogsRule(a) {
 // ------------------------------------------------------------------ wiring
 [$("#from").value, $("#to").value] = defaultRange();
 $("#screenForm").addEventListener("submit", screen);
-$("#openDirect").addEventListener("click", () => openSheet("#directSheet"));
+$("#openStandards").addEventListener("click", () => { renderStandards(); openSheet("#stdSheet"); });
 $("#openSettings").addEventListener("click", () => openSheet("#settingsSheet"));
 
 // ------------------------------------------------------------------ photo filings: Gemini or Claude?
