@@ -11,6 +11,8 @@ Environment
   GLM_MODEL       pin the model id; by default the GLM 5.3 Flash id is looked up in the key's model list
   GLM_BASE_URL    override the endpoint (default: NVIDIA for nvapi- keys, else https://api.z.ai/api/paas/v4)
   GLM_MAX_IMAGES  pictures per request (default 8)
+  NVIDIA_TEXT_MODELS  comma-separated model ids for text filings when Gemini is down (default: DeepSeek
+                  Flash, then GLM Flash, as the key's model list names them)
 """
 
 from __future__ import annotations
@@ -36,6 +38,10 @@ ZAI_MODELS = ["glm-5.3-flash", "glm-4.6v-flash"]  # the second is Z.ai's free vi
 # Tried on NVIDIA when the model list can't be read; the catalog's exact id varies by listing.
 NVIDIA_GUESSES = ["z-ai/glm-5.3-flash", "zai-org/glm-5.3-flash", "z-ai/glm-5-3-flash", "glm-5-3-flash"]
 GLM53_FLASH = re.compile(r"glm[-_]?5[._-]?3[-_]?flash", re.I)
+DEEPSEEK_FLASH = re.compile(r"deepseek[-_./a-z]*v?\d*[._-]?\d*[-_]?flash", re.I)
+GLM_FLASH_ANY = re.compile(r"glm[-_]?\d+(?:[._-]\d+)?[-_]?flash", re.I)
+# Tried on NVIDIA for text filings when the model list can't be read.
+TEXT_GUESSES = ["deepseek-ai/deepseek-v4-flash", "z-ai/glm-5.3-flash"]
 _listed: dict[str, list[str]] = {}
 UNITS = ("units", "thousands", "lakhs", "millions", "crores", "billions")
 STATEMENTS = tuple(T.STATEMENTS)
@@ -86,6 +92,26 @@ def models() -> list[str]:
         candidates = ZAI_MODELS
     ordered = ([pinned] if pinned else []) + candidates
     return list(dict.fromkeys(ordered))
+
+
+def text_models() -> list[str]:
+    """Models for reading a text filing (its text layer, no pictures) when Gemini fails, in order:
+    NVIDIA_TEXT_MODELS, else DeepSeek Flash then GLM Flash from the key's model list."""
+    pinned = [m.strip() for m in _env("NVIDIA_TEXT_MODELS").split(",") if m.strip()]
+    if pinned:
+        return pinned
+    if not is_nvidia():
+        return ZAI_MODELS[:1]
+    listed = _listed_models()
+    plain = lambda m: ("free" in m.lower(), len(m))  # noqa: E731  plain id before variants
+    found = sorted((m for m in listed if DEEPSEEK_FLASH.search(m)), key=plain)
+    found += sorted((m for m in listed if GLM53_FLASH.search(m)), key=plain)
+    found += sorted((m for m in listed if GLM_FLASH_ANY.search(m) and not GLM53_FLASH.search(m)), key=plain)
+    return list(dict.fromkeys(found or TEXT_GUESSES))
+
+
+def text_label() -> str:
+    return "DeepSeek/GLM Flash" + (" (NVIDIA)" if is_nvidia() else "")
 
 
 def label() -> str:
@@ -230,10 +256,11 @@ def locate(pdf: Path, pages: list[int], system: str, instruction: str,
 
 
 def ask(system: str, instruction: str, images: list[tuple[str, bytes]] | None = None,
-        deadline: float | None = None) -> tuple[dict, str, dict]:
-    """One JSON question with optional labelled JPEG images. Returns (answer, model, usage)."""
+        deadline: float | None = None, candidates: list[str] | None = None) -> tuple[dict, str, dict]:
+    """One JSON question with optional labelled JPEG images. Returns (answer, model, usage).
+    `candidates`: the models to try in order (default: models())."""
     errors = []
-    for model in models():
+    for model in candidates or models():
         content = []
         for label_text, jpg in images or []:
             content.append({"type": "text", "text": label_text})
