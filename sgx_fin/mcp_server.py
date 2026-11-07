@@ -589,6 +589,10 @@ def results_text(ctx: Context, normalised: dict, meta: dict, formats: dict, head
              "Verdict: " + ("OK, the figures are confirmed by their printed totals." if verdict["ok"] else
                             "NOT VERIFIED: " + "; ".join(verdict["reasons"]) + ". Don't present these figures as "
                             "checked; fix what is listed below, or tell the user what is wrong.")]
+    corrected = [f"{checks.STATEMENT_NAMES.get(st, st)}: {c}" for st, b in normalised.items() for c in b.get("corrected") or []]
+    if corrected:
+        lines += ["", "Put right by the program, where two printed totals agree on the figure (labels say so in the "
+                      "Source Map; tell the user): " + "; ".join(corrected)]
     if fails:
         factor = next((b.get("step", 1.0) for b in normalised.values()), 1.0)
         lines += ["", "These tie-outs FAIL (figures in the filing's own unit). Re-read the lines involved on the page "

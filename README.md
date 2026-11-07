@@ -75,17 +75,40 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
    and sent to the AI with a strict JSON schema built from the template, so
    every number lands on a known line. Group (consolidated) figures only, with the company's own label kept for audit.
    Statements that are **pictures** take their own route first (see below).
-6. **Check and correct** (`sgx_fin/checks.py`): parts must add up to their printed totals (PBT +
-   tax = PAT, interest income + interest expense = net interest income, assets = liabilities +
-   equity, cash at the beginning + net change = cash at the end, …). A pass has to prove
-   something: a check whose figures are all 0 **fails** ("every figure is 0": lines read as 0 that may
-   not be printed at all), and the slack allowed is only the rounding of the figures involved (half
-   of the filing's unit each, or of its decimals when every figure has some), never a share of the
-   total, so a misread digit can't hide inside 0.2% of a bank's total assets. A figure whose sign was
-   read backwards is flipped where that, and only that, makes a failing check add up. Any check still
-   failing, or gross profit left blank, sends the pages back to the AI once with the failing lines
-   pointed out; the second reading's figures are taken only where they make the totals add up (or
-   leave out lines the first reading invented as 0), and its gross expense where the first had none.
+6. **Check and correct** (`sgx_fin/checks.py`, `sgx_fin/textlayer.py`): parts must add up to their printed
+   totals (PBT + tax (+ discontinued operations) = PAT, interest income + interest expense = net interest
+   income, assets = liabilities + equity, total assets − total liabilities = net assets, cash at the
+   beginning + net change + exchange differences = cash at the end, …). The checks are **lenient about
+   presentation and strict about figures**:
+   - **Either layout passes.** A line a filing may print inside or outside a total counts either way:
+     exchange differences above the net change in cash (Japanese and US layouts, e.g. Panasonic) or below
+     it, perpetual securities inside or after the owners' equity, assets and liabilities held for sale
+     inside or after the current subtotals, attributable-to-perpetual-holders lines inside or beside the
+     owners' share. Cash moved to assets held for sale (or a disposal group, overdrafts) between the net
+     change and cash at the end has its own line (**Other Changes in Cash**).
+   - **Rounding never fails a check.** The slack is the rounding of the figures involved (half of the
+     filing's unit each, or of its decimals when every figure has some, never less than two units), plus
+     0.005% of the largest figure on big totals, **capped at 10 of the filing's units**. It is never a real
+     share of the total, so a misread digit that matters can't hide inside 0.2% of a bank's total assets.
+   - **A pass has to prove something**: a check whose figures are all 0 **fails** ("every figure is 0":
+     lines read as 0 that may not be printed at all).
+   - **Mistakes the figures themselves prove are put right, without AI**, and labelled in the Source Map:
+     a sign read backwards is flipped where that, and only that, makes a failing check add up; a line
+     that **two failing checks agree** is wrong (both give it the same figure from other printed lines,
+     e.g. total assets misread, or a total taken from the row next door) takes that figure; total equity
+     (or liabilities) equal to total assets is the "Total equity and liabilities" line read for it, and is
+     worked out from the other two totals.
+   - **Text filings are re-read from the PDF's own text first** (free, exact digits): for each failing
+     check, the figures printed on its lines (the line the AI named, or a line whose wording means that
+     line: "Non-controlling interests" for the minority's share) are tried, and one is kept only where it
+     makes the check add up without breaking another. Labels wrapped over two lines and figures wrapped
+     onto the next line are followed.
+   - Any check still failing, or gross profit left blank, sends the pages back to the AI once with the
+     failing lines pointed out, and **what usually causes that failure** ("total_equity is never the
+     'Total equity and liabilities' line", "take the lines under 'attributable to'"…); the second reading's
+     figures are taken only where they make the totals add up (or leave out lines the first reading
+     invented as 0), and its gross expense where the first had none. The AI is also asked to add up every
+     column itself before answering.
    **Verdict**: an extraction is *verified* only when at least one check passes, none fails, every
    statement has figures and gross profit isn't blank. **0 checks pass is a failure**, not a success:
    nothing confirms such figures (a presentation's highlights, a page read as zeros).
@@ -279,8 +302,9 @@ owner adds org-wide connectors (same parameters on `claude.ai/admin-settings/con
 connector doesn't call Gemini or GLM: it hands Claude the pages, turned upright, straightened,
 cropped and contrast-stretched (`sgx_fin/pictures.py`), each as two overlapping halves for small
 digits, plus the same transcription rules and template the server's AI gets. Claude (e.g. Opus 5.5
-in the chat) reads the figures and submits them; the server then rescales, repairs signs, derives
-missing totals, runs the tie-out checks and replies with any failing lines to re-read, and a link to
+in the chat) reads the figures and submits them; the server then rescales, repairs signs, puts right
+a line two printed totals agree on (and says so), derives missing totals, runs the tie-out checks and
+replies with any failing lines to re-read (with what usually causes each failure), and a link to
 the Excel workbook. **In the web app**, when the scan finds a filing's statements are photos, a small window asks
 whether to read them with Claude Opus 5.5 instead. **Use Opus 5.5** opens a new Claude chat with the
 filing already typed in (the connector does the rest and replies with the Excel link); **Keep
