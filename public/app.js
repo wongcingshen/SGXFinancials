@@ -488,8 +488,7 @@ function saveScreen() {
       if (job.status in BUSY) Object.assign(job, { status: "failed", since: null, error: "Stopped when the page was reloaded. Try again." });
       return { ...a, job };
     });
-    const saved = { items, range: state.range, debug: state.debug, from: $("#from").value, to: $("#to").value,
-      company: $("#company").value, at: Date.now() };
+    const saved = { items, range: state.range, debug: state.debug, company: $("#company").value, at: Date.now() };
     idb("readwrite", (st) => st.put(saved, SCREEN_KEY));
   }, 300);
 }
@@ -505,8 +504,8 @@ async function restoreScreen() {
   if (!saved?.items?.length || state.items.length || $("#screenBtn").disabled) return; // a new screen has started
   state.items = saved.items.map((a) => ({ ...a, attachments: keepAttachments(a.attachments), job: { ...a.job, blobUrl: a.job.blob ? URL.createObjectURL(a.job.blob) : undefined } }));
   Object.assign(state, { range: saved.range ?? "", debug: saved.debug || null });
-  if (saved.from) $("#from").value = saved.from;
-  if (saved.to) $("#to").value = saved.to;
+  // The dates stay on the usual default (the last results days), not the saved screen's: the
+  // cards' own range is shown in the note above them.
   $("#company").value = saved.company || "";
   renderCards();
   loadReleaseDates(); // any notice whose date hadn't been read yet
