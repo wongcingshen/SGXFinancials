@@ -161,11 +161,20 @@ function renderSkeleton() {
   }</div>`;
 }
 
+// Press releases, presentations, highlights and the like never hold the formal statements: they are
+// left out of every attachment list. Keep in step with EXCLUDED_ATTACHMENT in scraper/sgx.mjs.
+const EXCLUDED_ATTACHMENT =
+  /(press|media|news)[\s_-]*release|presentation|slides?\b|highlights?|webcast|transcript|infographic|fact[\s_-]*sheet|speech/i;
+const fileOf = (u) => { try { return decodeURIComponent(new URL(u).pathname.split("/").pop() || ""); } catch { return ""; } };
+const keepAttachments = (files) => Array.isArray(files)
+  ? files.filter((f) => !EXCLUDED_ATTACHMENT.test(`${f.name || ""} ${fileOf(f.url || "")}`))
+  : files;
+
 // The PDFs in the announcement's attachment list, each linked. Once extracted, the one that held
 // the financial statements is shown first and marked; the rest (releases, slides) are listed after.
 function filesLine(a) {
   if (!Array.isArray(a.attachments)) return "";
-  if (!a.attachments.length) return `<span class="files none">${icon("file", "width:14px;height:14px")}No attachments found</span>`;
+  if (!a.attachments.length) return `<span class="files none">${icon("file", "width:14px;height:14px")}No financial statements PDF (press releases, presentations and highlights are hidden)</span>`;
   const usedUrl = (a.job?.result || a.job?.scan)?.scan?.used_url;
   const link = (f) => `<a href="${esc(f.url)}" target="_blank" rel="noopener">${esc(f.name || "PDF")}</a>`;
   const used = usedUrl && a.attachments.find((f) => f.url === usedUrl);
@@ -419,7 +428,7 @@ async function screen(ev) {
       try { res = await api(`${route}&${q}`); break; } catch (e) { err = e; if (e.auth) break; }
     }
     if (!res) throw err;
-    state.items = res.announcements.map((a) => ({ ...a, kind: a.kind || "results", key: a.url, job: { status: "idle" } }));
+    state.items = res.announcements.map((a) => ({ ...a, attachments: keepAttachments(a.attachments), kind: a.kind || "results", key: a.url, job: { status: "idle" } }));
     markDuplicates(state.items);
     state.animate = true;
     state.debug = res.debug || null;
@@ -494,7 +503,7 @@ async function restoreScreen() {
   const saved = await idb("readonly", (st) => st.get(SCREEN_KEY));
   state.restored = true;
   if (!saved?.items?.length || state.items.length || $("#screenBtn").disabled) return; // a new screen has started
-  state.items = saved.items.map((a) => ({ ...a, job: { ...a.job, blobUrl: a.job.blob ? URL.createObjectURL(a.job.blob) : undefined } }));
+  state.items = saved.items.map((a) => ({ ...a, attachments: keepAttachments(a.attachments), job: { ...a.job, blobUrl: a.job.blob ? URL.createObjectURL(a.job.blob) : undefined } }));
   Object.assign(state, { range: saved.range ?? "", debug: saved.debug || null });
   if (saved.from) $("#from").value = saved.from;
   if (saved.to) $("#to").value = saved.to;
@@ -579,8 +588,8 @@ async function extract(a, { pages } = {}) {
     } catch (e) {
       // The announcement page wouldn't give up its attachments: open the Title link in a browser.
       if (!e.body?.need_browser || !a.url || a.attachments?.length) throw e;
-      const { files } = await api(`/api/browse?op=attachments&url=${encodeURIComponent(a.url)}`);
-      if (!files.length) throw new Error("No PDFs in the announcement's attachment list");
+      const files = keepAttachments((await api(`/api/browse?op=attachments&url=${encodeURIComponent(a.url)}`)).files);
+      if (!files.length) throw new Error("No financial statements PDF in the announcement (press releases, presentations and highlights are left out)");
       a.attachments = files;
       scanRes = await api("/api/process?op=process", { method: "POST", body: formData(a, true, pages || a.pages) });
     }

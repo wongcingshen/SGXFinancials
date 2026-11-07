@@ -349,6 +349,15 @@ async function clickForUrl(page, n) {
 }
 
 // ------------------------------------------------------------------ attachments
+// Attachments that never hold the formal financial statements are left out of every list, so they
+// are neither shown nor opened. Matched on the link text and the file name (underscores count as
+// spaces: "OCBC_3Q26_Results_Press_Release.pdf"). Keep in step with EXCLUDED_ATTACHMENT in
+// sgx_fin/sgx_client.py.
+export const EXCLUDED_ATTACHMENT =
+  /(press|media|news)[\s_-]*release|presentation|slides?\b|highlights?|webcast|transcript|infographic|fact[\s_-]*sheet|speech/i;
+const fileName = (url) => { try { return decodeURIComponent(new URL(url).pathname.split("/").pop() || ""); } catch { return ""; } };
+export const isExcludedAttachment = (f) => EXCLUDED_ATTACHMENT.test(`${f.name || ""} ${fileName(f.url || "")}`);
+
 /**
  * Open one announcement (a Title link) and return the files in its "announcement-attachment-list"
  * element. Pages without that element fall back to any PDF / FileOpen link on the page.
@@ -385,7 +394,7 @@ export async function attachments(browser, annUrl, opts = {}) {
     }
     const seen = new Set();
     return got.files
-      .filter((f) => isSgxUrl(f.url) && !seen.has(f.url) && seen.add(f.url))
+      .filter((f) => isSgxUrl(f.url) && !isExcludedAttachment(f) && !seen.has(f.url) && seen.add(f.url))
       .map((f) => ({ ...f, from: got.inList ? "announcement-attachment-list" : "page" }));
   } finally {
     await page.close().catch(() => {});

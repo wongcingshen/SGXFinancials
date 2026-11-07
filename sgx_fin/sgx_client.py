@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
 
 import requests
 
@@ -203,7 +203,8 @@ class SGXClient:
         if ann.url.lower().endswith(".pdf"):
             return [ann.url]
         if ann.raw.get("attachments"):  # already read by the browser from announcement-attachment-list
-            return [f["url"] for f in ann.raw["attachments"] if is_sgx_url(f["url"])]
+            return [f["url"] for f in ann.raw["attachments"]
+                    if is_sgx_url(f["url"]) and not is_excluded_attachment(f["url"], f.get("name", ""))]
         urls: list[str] = []
         try:
             r = self.session.get(ann.url, timeout=self.timeout)
@@ -211,12 +212,13 @@ class SGXClient:
             for h in re.findall(r'href=["\']([^"\']+)["\']', r.text, flags=re.I):
                 if "fileopen" in h.lower() or h.lower().split("?")[0].endswith(".pdf"):
                     full = urljoin(r.url, h.replace("&amp;", "&"))
-                    if is_sgx_url(full) and full not in urls:
+                    if is_sgx_url(full) and full not in urls and not is_excluded_attachment(full):
                         urls.append(full)
         except requests.RequestException:
             pass
         if not urls and browser_available():
-            urls = [f["url"] for f in run_browser("attachments", ann.url)["files"]]
+            urls = [f["url"] for f in run_browser("attachments", ann.url)["files"]
+                    if not is_excluded_attachment(f["url"], f.get("name", ""))]
         return urls
 
     def download(self, url: str, dest_dir: Path) -> Path | None:
@@ -242,6 +244,20 @@ class SGXClient:
         index_file.write_text(json.dumps(index))
         time.sleep(0.5)  # be polite to links.sgx.com
         return path
+
+
+# Attachments that never hold the formal financial statements (press / media releases, slides,
+# highlights...) are left out of every attachment list: not shown, not downloaded. Matched on the
+# link text and the file name, underscores counting as spaces. Keep in step with
+# EXCLUDED_ATTACHMENT in scraper/sgx.mjs.
+EXCLUDED_ATTACHMENT = re.compile(
+    r"(press|media|news)[\s_-]*release|presentation|slides?\b|highlights?|webcast|transcript"
+    r"|infographic|fact[\s_-]*sheet|speech", re.I)
+
+
+def is_excluded_attachment(url: str, name: str = "") -> bool:
+    file = unquote(Path(urlparse(url).path).name)
+    return bool(EXCLUDED_ATTACHMENT.search(f"{name} {file}"))
 
 
 def _filename(resp: requests.Response, url: str) -> str:
