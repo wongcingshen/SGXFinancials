@@ -1523,6 +1523,9 @@ def test_cogs_is_judged_line_by_line_and_explained():
     assert r2.json["normalised"]["income_statement"]["values"]["cost_of_sales"] == [-87_500, -81_300]
     wb = load_workbook(io.BytesIO(base64.b64decode(r2.json["workbook_b64"])))
     gp_row = next(r for r in wb["Income Statement"].iter_rows(values_only=True) if r[0] == "Gross Profit")
+    assert r.json["csv_filename"] == "F13.csv" and r2.json["csv_filename"] == "F13.csv"
+    gp_csv = [ln for ln in base64.b64decode(r2.json["csv_b64"]).decode("utf-8-sig").splitlines() if ",gross_profit," in ln]
+    assert any(",33012," in ln for ln in gp_csv), gp_csv  # the recalculated COGS reaches the CSV too
     assert gp_row[1:3] == (33_012, 26_300) and checks.verdict(r2.json["normalised"])["ok"] == r2.json["verdict"]["ok"]
     bad = client.post("/api/recompute?op=recompute", content_type="multipart/form-data",
                       data={"normalised": json.dumps(r.json["normalised"]), "meta": "{}", "in_cogs": "[true]"})
@@ -1552,6 +1555,39 @@ def test_workbook_and_merge():
     assert wb["Balance Sheet"]["A1"].value == "ACME HOLDINGS LIMITED (ACME)"
     (HERE / "out").mkdir(exist_ok=True)
     (HERE / "out" / "ACME.xlsx").write_bytes(data2)
+
+
+def test_csv_export():
+    """The CSV next to each workbook: one row per figure, every merged period, in the sheets' unit and signs."""
+    import csv
+    from sgx_fin import checks as checks_mod, template as T
+    from sgx_fin.csv_writer import COLUMNS, workbook_csv
+    meta = {"company_name": "ACME HOLDINGS LIMITED", "stock_code": "ACME", "currency": "SGD", "filing": "1H2026",
+            "pages": "1,2,4"}
+    norm = extractor.normalise(FAKE)
+    meta["verdict"] = checks_mod.verdict(norm)
+    data, _ = workbook_bytes(None, norm, meta)
+    fy = json.loads(json.dumps(FAKE))
+    fy["income_statement"]["periods"] = [{"label": "FY2026", "period_end": "2026-12-31", "months": 12}]
+    for r in fy["income_statement"]["rows"]:
+        r["values"] = [v * 2 for v in r["values"][:1]]
+    data2, _ = workbook_bytes(data, extractor.normalise(fy), {**meta, "filing": "FY2026"})
+    raw = workbook_csv(data2)
+    assert raw.startswith(b"\xef\xbb\xbf")  # a BOM, so Excel reads UTF-8 labels right
+    rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))))
+    assert list(rows[0]) == COLUMNS
+    get = {(r["statement"], r["line_key"], r["period_end"], r["months"]): r for r in rows}
+    rev = get[("income_statement", "revenue", "2026-06-30", "6")]
+    assert rev["value"] == "120512" and rev["unit"] == "thousands" and rev["company_label"] == "Revenue"
+    assert rev["stock_code"] == "ACME" and rev["currency"] == "SGD" and rev["period"] == "6M Jun 2026"
+    assert rev["filing"] == "1H2026" and rev["pages"] == "1,2,4" and rev["verified"] in ("true", "false")
+    assert get[("income_statement", "revenue", "2026-12-31", "12")]["value"] == "241024"  # the merged FY period
+    assert get[("income_statement", "cost_of_sales", "2026-06-30", "6")]["value"] == "-80412"  # costs negative, as in the sheet
+    eps = get[("income_statement", "eps_basic", "2026-06-30", "6")]
+    assert eps["value"] == "3.04" and eps["unit"] == "cents"
+    assert get[("balance_sheet", "total_assets", "2026-06-30", "0")]["value"] == "199000"
+    assert {r["statement"] for r in rows} == set(T.STATEMENT_IDS) and all(r["value"] for r in rows)
+    assert workbook_csv(data2) == raw  # stable output, so two exports diff cleanly
 
 
 def test_mcp_connector():
@@ -1627,6 +1663,10 @@ def test_mcp_connector():
         wb = load_workbook(io.BytesIO(r.data))
         assert wb["Income Statement"]["B1"].value is not None or wb["Income Statement"]["A1"].value
         assert client.get(f"{u.path}?{u.query.replace('&s=', '&s=0')}").status_code == 403  # tampered signature
+        assert f"{link}&fmt=csv" in text
+        r = client.get(f"{u.path}?{u.query}&fmt=csv")
+        assert r.status_code == 200 and r.headers["Content-Disposition"].endswith('ACME.csv"') and r.mimetype == "text/csv"
+        assert b",revenue,Revenue," in r.data and b",120512," in r.data
 
         # A misread total that two printed totals agree on is put right, and Claude is told so.
         wrong = copy.deepcopy(data)
@@ -1835,6 +1875,9 @@ def test_standards_learnt_from_the_users_workbooks():
     import base64
     ws = load_workbook(io.BytesIO(base64.b64decode(r.get_json()["workbook_b64"])))["Income Statement"]
     assert "SGD m" in ws["A2"].value
+    # The CSV follows the user's standard too: millions, costs positive.
+    text = base64.b64decode(r.get_json()["csv_b64"]).decode("utf-8-sig")
+    assert any(",revenue," in ln and ",millions," in ln for ln in text.splitlines()), text[:400]
 
 
 def test_connector_uses_the_users_standards():

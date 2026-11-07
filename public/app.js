@@ -228,8 +228,8 @@ function cardHtml(a, i) {
     ? unverified
       ? a.url
         ? `${claudeBtn("recheck", "Check with Claude")}<a class="btn btn-outline btn-icon" data-tour="excel" href="${j.blobUrl}" download="${esc(j.filename)}" title="Download the Excel anyway (figures not verified)" aria-label="Download the Excel anyway (figures not verified)">${icon("download")}</a>`
-        : `<a class="btn btn-ember" data-tour="excel" href="${j.blobUrl}" download="${esc(j.filename)}" title="The figures are not verified">${icon("download")}Excel</a>`
-      : `<a class="btn btn-ember" data-tour="excel" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Excel</a>`
+        : `<a class="btn btn-ember" data-tour="excel" href="${j.blobUrl}" download="${esc(j.filename)}" title="The figures are not verified">${icon("download")}Excel</a>${csvLink(j)}`
+      : `<a class="btn btn-ember" data-tour="excel" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Excel</a>${csvLink(j)}`
     : busy
       ? `<button type="button" class="btn btn-ember" disabled><span class="spin" aria-hidden="true"></span>${esc(label)}</button>`
       : j.status === "skipped" ? (isSlides(j) && a.url
@@ -499,8 +499,8 @@ function saveScreen() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     const items = state.items.map((a) => {
-      const { blobUrl, ...job } = a.job;
-      if (job.result?.workbook_b64) job.result = { ...job.result, workbook_b64: undefined }; // the blob holds it
+      const { blobUrl, csvUrl, ...job } = a.job;
+      if (job.result?.workbook_b64) job.result = { ...job.result, workbook_b64: undefined, csv_b64: undefined }; // the blobs hold them
       if (job.status in BUSY) Object.assign(job, { status: "failed", since: null, error: "Stopped when the page was reloaded. Try again." });
       return { ...a, job };
     });
@@ -518,7 +518,8 @@ async function restoreScreen() {
   const saved = await idb("readonly", (st) => st.get(SCREEN_KEY));
   state.restored = true;
   if (!saved?.items?.length || state.items.length || $("#screenBtn").disabled) return; // a new screen has started
-  state.items = dropEmpty(saved.items.map((a) => ({ ...a, attachments: keepAttachments(a.attachments), job: { ...a.job, blobUrl: a.job.blob ? URL.createObjectURL(a.job.blob) : undefined } })));
+  state.items = dropEmpty(saved.items.map((a) => ({ ...a, attachments: keepAttachments(a.attachments), job: { ...a.job, blobUrl: a.job.blob ? URL.createObjectURL(a.job.blob) : undefined,
+    csvUrl: a.job.csvBlob ? URL.createObjectURL(a.job.csvBlob) : undefined } })));
   Object.assign(state, { range: saved.range ?? "", debug: saved.debug || null });
   // The dates stay on the usual default (the last results days), not the saved screen's: the
   // cards' own range is shown in the note above them.
@@ -571,6 +572,17 @@ async function saveToFolder(name, blob) {
   await w.write(blob);
   await w.close();
 }
+
+// The CSV that comes with every workbook: the same figures (every period merged in), one row per figure.
+const csvName = (xlsx) => String(xlsx || "financials.xlsx").replace(/\.xlsx$/i, "") + ".csv";
+function setCsv(j, res) {
+  if (j.csvUrl) URL.revokeObjectURL(j.csvUrl);
+  if (!res.csv_b64) return Object.assign(j, { csvBlob: null, csvUrl: undefined });
+  const csvBlob = new Blob([Uint8Array.from(atob(res.csv_b64), (c) => c.charCodeAt(0))], { type: "text/csv" });
+  Object.assign(j, { csvBlob, csvUrl: URL.createObjectURL(csvBlob) });
+}
+const csvLink = (j, cls = "btn btn-outline") => j.csvUrl
+  ? `<a class="${cls}" href="${j.csvUrl}" download="${esc(csvName(j.filename))}" title="The same figures as a CSV, one row per figure">${icon("download")}CSV</a>` : "";
 
 // ------------------------------------------------------------------ extraction
 function formData(a, dryRun, pages, workbook, files) {
@@ -655,8 +667,9 @@ async function extract(a, { pages } = {}) {
     const filename = name || res.filename;
     Object.assign(j, { status: "done", result: res, blob, blobUrl: URL.createObjectURL(blob), filename, merged: Boolean(existing), saved: false,
       seconds: Math.round((Date.now() - j.started) / 1000) });
+    setCsv(j, res);
     if (state.folderOk) {
-      try { await saveToFolder(filename, blob); j.saved = true; }
+      try { await saveToFolder(filename, blob); j.saved = true; if (j.csvBlob) await saveToFolder(csvName(filename), j.csvBlob); }
       catch (e) { j.saveError = e.message || String(e); }
     }
   } catch (e) {
@@ -707,7 +720,12 @@ async function downloadAll(only) {
   if (state.folderOk && state.dir) {
     const failed = [];
     for (const a of done) {
-      try { await saveToFolder(a.job.filename || workbookName(a), a.job.blob); a.job.saved = true; a.job.saveError = ""; }
+      try {
+        const name = a.job.filename || workbookName(a);
+        await saveToFolder(name, a.job.blob);
+        a.job.saved = true; a.job.saveError = "";
+        if (a.job.csvBlob) await saveToFolder(csvName(name), a.job.csvBlob);
+      }
       catch (e) { a.job.saveError = e.message || String(e); failed.push(a); }
       renderCard(a);
     }
@@ -735,6 +753,7 @@ async function zipDownload(done) {
     for (let n = 2; used.has(name); n++) name = name.replace(/(\.xlsx)?$/, `-${n}.xlsx`).replace(/(-\d+)+-(\d+)\.xlsx$/, "-$2.xlsx");
     used.add(name);
     zip.file(name, a.job.blob);
+    if (a.job.csvBlob) zip.file(csvName(name), a.job.csvBlob);
   }
   const blob = await zip.generateAsync({ type: "blob" });
   const link = document.createElement("a");
@@ -920,7 +939,8 @@ function showDetails(a) {
   $("#runFoot").hidden = j.status !== "done";
   $("#runFoot").innerHTML = j.status === "done"
     ? `${unverified && a.url ? `<button type="button" class="btn btn-ember btn-lg btn-block" data-why="recheck">${icon("sparkles")}Re-check with Claude</button>` : ""}
-      <a class="btn ${unverified ? "btn-outline" : "btn-ember"} btn-lg btn-block" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Download ${esc(j.filename)}${unverified ? " (not verified)" : ""}</a>` : "";
+      <a class="btn ${unverified ? "btn-outline" : "btn-ember"} btn-lg btn-block" href="${j.blobUrl}" download="${esc(j.filename)}">${icon("download")}Download ${esc(j.filename)}${unverified ? " (not verified)" : ""}</a>
+      ${j.csvUrl ? `<a class="btn btn-outline btn-lg btn-block" href="${j.csvUrl}" download="${esc(csvName(j.filename))}">${icon("download")}Download ${esc(csvName(j.filename))} (one row per figure)</a>` : ""}` : "";
   $("#rerunForm")?.addEventListener("submit", (e) => {
     e.preventDefault();
     const p = $("#rerunPages").value.replace(/\s/g, "");
@@ -1273,8 +1293,9 @@ async function recalcCogs(a) {
       { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     if (j.blobUrl) URL.revokeObjectURL(j.blobUrl);
     Object.assign(j, { blob, blobUrl: URL.createObjectURL(blob) });
+    setCsv(j, res);
     if (state.folderOk) {
-      try { await saveToFolder(j.filename, blob); j.saved = true; } catch (e) { j.saveError = e.message || String(e); }
+      try { await saveToFolder(j.filename, blob); j.saved = true; if (j.csvBlob) await saveToFolder(csvName(j.filename), j.csvBlob); } catch (e) { j.saveError = e.message || String(e); }
     }
     renderCard(a);
     toast(`Cost of goods sold recalculated${res.chosen.length ? ` from ${res.chosen.length} line${res.chosen.length === 1 ? "" : "s"}` : ": none, so gross profit equals revenue"}. The workbook is updated.`);

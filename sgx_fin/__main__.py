@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from . import extractor
+from .csv_writer import workbook_csv
 from .excel_writer import write_workbook
 from .page_scanner import format_report
 from .pipeline import NotResults, Result, process_announcement, process_pdf
@@ -46,8 +47,9 @@ def _report(res: Result, out_dir: Path, code: str) -> None:
         return
     name = f"{code or res.meta.get('company_name', 'company')}".replace(" ", "_")
     path, checks = write_workbook(out_dir / f"{name}.xlsx", res.normalised, res.meta)
+    path.with_suffix(".csv").write_bytes(workbook_csv(path.read_bytes()))  # every period in the workbook, one row per figure
     fails = [c for c in checks if c["status"] == "FAIL"]
-    print(f"  -> {path}  tokens in/out {res.usage.get('input_tokens')}/{res.usage.get('output_tokens')}"
+    print(f"  -> {path} (+ .csv)  tokens in/out {res.usage.get('input_tokens')}/{res.usage.get('output_tokens')}"
           f"  checks: {sum(c['status'] == 'PASS' for c in checks)} pass, {len(fails)} fail")
     for c in fails:
         print(f"     FAIL {c['period']}: {c['check']} (diff {c['difference']})")
@@ -71,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--model", default=None, help="default: SGX_GEMINI_MODEL / CLAUDE_MODEL or the provider default")
         p.add_argument("--effort", default="high", choices=["low", "medium", "high", "xhigh", "max"])
         p.add_argument("--dry-run", action="store_true", help="scan pages only, no AI call")
-        p.add_argument("--out", default="output", help="folder for workbooks")
+        p.add_argument("--out", default="output", help="folder for workbooks (and their CSVs)")
 
     p = sub.add_parser("screen", help="list announcements for an SGX page URL / date")
     screen_args(p)
