@@ -5,29 +5,44 @@ a total doesn't add up, to report PASS / FAIL on the workbook's Checks sheet, an
 extraction a verdict: can its figures be relied on?
 
 Each check is (statement, name, parts, total). A part starting with "-" is subtracted; one ending
-in "?" may be missing (it then counts as nothing). A check runs when its total and every required
+in "?" may be missing (it then counts as nothing); one ending in "~" may or may not be inside the
+total already (perpetual securities shown within or after the owners' equity): the check passes
+either way. A check runs when its total and every required
 part have a figure; it is skipped entirely when none of its lines exist (a check for the other
 format, bank vs general).
 
 A PASS has to prove something. A check whose figures are all 0 fails (0 + 0 = 0 only shows that
-nothing was read), and the slack allowed is the rounding of the figures involved, nothing more, so a
-misread digit can't hide inside a percentage of a large total.
+nothing was read), and the slack allowed is the rounding of the figures involved plus a sliver of
+materiality (0.005% of the largest figure, never more than 10 of the filing's units), so rounding
+never fails a check but a misread digit that matters can't hide inside a percentage of a large total.
+
+Checks are lenient about presentation, strict about figures: a line a filing may print inside or
+outside a total ("~": exchange differences, perpetual securities, held for sale) passes either way,
+and a line two failing checks agree is wrong is put right from them (repair_by_agreement).
 """
 
 from __future__ import annotations
 
 CHECKS = [
     ("income_statement", "Revenue + COGS = Gross Profit", ["revenue", "cost_of_sales"], "gross_profit"),
-    ("income_statement", "PBT + Tax = PAT (continuing)", ["profit_before_tax", "tax"], "profit_after_tax"),
+    ("income_statement", "PBT + Tax (+ discontinued) = PAT", ["profit_before_tax", "tax", "discontinued_ops?"],
+     "profit_after_tax"),
     ("income_statement", "Shareholders + MI (+perps) = PAT (+ associates after tax)",
-     ["pat_shareholders", "pat_minority?", "perpetual_holders?", "-share_associates_after_tax?"], "profit_after_tax"),
-    ("balance_sheet", "NCA + CA = Total Assets", ["total_nca", "total_ca"], "total_assets"),
-    ("balance_sheet", "CL + NCL = Total Liabilities", ["total_cl", "total_ncl"], "total_liabilities"),
+     ["pat_shareholders", "pat_minority?", "perpetual_holders~", "-share_associates_after_tax?"], "profit_after_tax"),
+    # Assets / liabilities held for sale are printed inside the current subtotal or after it.
+    ("balance_sheet", "NCA + CA = Total Assets", ["total_nca", "total_ca", "assets_held_for_sale~"], "total_assets"),
+    ("balance_sheet", "CL + NCL = Total Liabilities", ["total_cl", "total_ncl", "liabilities_held_for_sale~"],
+     "total_liabilities"),
     ("balance_sheet", "Total Liabilities + Total Equity = Total Assets", ["total_liabilities", "total_equity"], "total_assets"),
-    ("balance_sheet", "Shareholders' Equity + MI = Total Equity", ["shareholders_equity", "minority_interests?"], "total_equity"),
-    ("cash_flow", "Operating + Investing + Financing = Net Change",
-     ["cf_net_operating", "cf_net_investing", "cf_net_financing"], "cf_net_change"),
-    ("cash_flow", "Begin + Net Change + FX = End", ["cf_cash_begin", "cf_net_change", "cf_fx_effect?"], "cf_cash_end"),
+    ("balance_sheet", "Total Assets - Total Liabilities = Net Assets", ["total_assets", "-total_liabilities"], "net_assets"),
+    ("balance_sheet", "Shareholders' Equity + MI (+ perps) = Total Equity",
+     ["shareholders_equity", "minority_interests?", "perpetual_securities~"], "total_equity"),
+    # Exchange differences come after the net change (most SGX filings) or inside it (Japanese, US layouts).
+    ("cash_flow", "Operating + Investing + Financing (+ FX) = Net Change",
+     ["cf_net_operating", "cf_net_investing", "cf_net_financing", "cf_fx_effect~", "cf_other_cash_changes~"],
+     "cf_net_change"),
+    ("cash_flow", "Begin + Net Change + FX (+ other) = End",
+     ["cf_cash_begin", "cf_net_change", "cf_fx_effect~", "cf_other_cash_changes~"], "cf_cash_end"),
     # banks
     ("income_statement", "Interest Income + Interest Expense = Net Interest Income",
      ["interest_income", "interest_expense"], "net_interest_income"),
@@ -48,8 +63,48 @@ CHECKS = [
 
 
 def terms(parts: list[str]) -> list[tuple[int, str, bool]]:
-    """[(sign, key, optional)] of a check's parts."""
-    return [(-1 if p.startswith("-") else 1, p.lstrip("-").rstrip("?"), p.endswith("?")) for p in parts]
+    """[(sign, key, optional)] of a check's parts ("?" and "~" parts are both optional)."""
+    return [(-1 if p.startswith("-") else 1, p.lstrip("-").rstrip("?~"), p.endswith(("?", "~"))) for p in parts]
+
+
+def flexible(parts: list[str]) -> set[str]:
+    """Parts that may already be inside the total ("~")."""
+    return {p.lstrip("-").rstrip("~") for p in parts if p.endswith("~")}
+
+
+def _sums(parts: list[str], get) -> list[float]:
+    """The sum of a check's parts, once for each way its "~" parts may be counted (in or out)."""
+    ts, flex = terms(parts), flexible(parts)
+    fixed = sum(sign * (get(k) or 0) for sign, k, _ in ts if k not in flex)
+    out = [fixed]
+    for sign, k, _ in ts:
+        if k in flex and get(k):
+            out += [x + sign * get(k) for x in out]
+    return out
+
+
+# What usually lies behind a failing check, for the AI to look at first.
+CAUSES = {
+    "PBT + Tax (+ discontinued) = PAT": "profit_after_tax is the profit for the period from continuing AND discontinued "
+    "operations; the discontinued line goes in discontinued_ops",
+    "Shareholders + MI (+perps) = PAT (+ associates after tax)": "take pat_shareholders, pat_minority and "
+    "perpetual_holders only from the lines under 'attributable to', in the same column; not the discontinued "
+    "operations line or a comprehensive income line",
+    "Total Liabilities + Total Equity = Total Assets": "total_equity is never the 'Total equity and liabilities' line "
+    "(that equals total assets); total_liabilities is never 'Total liabilities and equity'",
+    "Shareholders' Equity + MI (+ perps) = Total Equity": "shareholders_equity is the equity attributable to owners "
+    "(the subtotal, or share capital + reserves when there is none); total_equity is never 'Total equity and liabilities'",
+    "Begin + Net Change + FX (+ other) = End": "a line printed between the net change and the cash at the end "
+    "(cash transferred to assets held for sale, cash of a disposal group, bank overdrafts, restricted cash) goes in "
+    "cf_other_cash_changes; cf_cash_end is the end of the cash flow statement's roll-forward, before any "
+    "reconciliation to the balance sheet below it; cf_cash_begin is this period's opening cash",
+    "Operating + Investing + Financing (+ FX) = Net Change": "use the printed net cash totals of each section (after "
+    "interest and tax paid), in the same column",
+    "NCA + CA = Total Assets": "total_ca / total_nca are the printed subtotals; assets held for sale shown under the "
+    "current subtotal are part of total_ca",
+    "CL + NCL = Total Liabilities": "total_cl / total_ncl are the printed subtotals; liabilities held for sale go in "
+    "liabilities_held_for_sale",
+}
 
 
 ZERO = "every figure is 0"
@@ -66,16 +121,22 @@ def _decimals(x: float) -> int:
     return 3
 
 
+MATERIAL = 0.00005  # 0.005% of the largest figure of a check counts as rounding...
+MATERIAL_UNITS = 10  # ...but never more than this many of the filing's printed units
+
+
 def tolerance(figures: list[float], step: float = 1.0) -> float:
     """Rounding slack in output units ('000) for figures that should add up.
 
     Each figure was printed rounded to the filing's unit (`step` output units), or to its decimals
     when every figure shows some (crores with paise), so the figures of a check can disagree by half
-    of that each; never less than two of it. No share of the total: 0.2% of a bank's total assets
-    would let a line be misread by billions."""
+    of that each; never less than two of it. On large totals (companies round from unrounded ledgers)
+    up to 0.005% of the largest figure is allowed too, capped at 10 printed units. No real share of
+    the total: 0.2% of a bank's total assets would let a line be misread by billions."""
     places = min((_decimals(v / step) for v in figures), default=0) if step else 0
     unit = max(step / 10 ** places, 0.001)  # figures are kept to 3 decimals of '000
-    return max(2 * unit, unit * len(figures) / 2)
+    largest = max((abs(v) for v in figures), default=0.0)
+    return max(2 * unit, unit * len(figures) / 2, min(MATERIAL * largest, MATERIAL_UNITS * unit))
 
 
 def run(statement: str, get, labels: dict | None = None, step: float = 1.0) -> list[dict]:
@@ -89,7 +150,7 @@ def run(statement: str, get, labels: dict | None = None, step: float = 1.0) -> l
         keys = [k for _, k, _ in ts]
         if all(get(k) is None for k in (*keys, total)):
             continue
-        s = diff = None
+        diff = None
         note = ""
         if str(labels.get(total, "")).startswith(("computed", "formula")):
             status = "derived"  # the total was calculated, not printed
@@ -97,8 +158,7 @@ def run(statement: str, get, labels: dict | None = None, step: float = 1.0) -> l
             status = "n/a"
         else:
             figures = [get(k) for k in keys if get(k) is not None] + [get(total)]
-            s = sum(sign * (get(k) or 0) for sign, k, _ in ts)
-            diff = round(s - get(total), 3)
+            diff = min((round(x - get(total), 3) for x in _sums(parts, get)), key=abs)
             if not any(figures):  # 0 + 0 = 0 proves nothing: lines read as 0 that may not be there at all
                 status, note = "FAIL", ZERO
             else:
@@ -110,6 +170,13 @@ def run(statement: str, get, labels: dict | None = None, step: float = 1.0) -> l
 
 def _passing(results: list[dict]) -> set[str]:
     return {c["check"] for c in results if c["status"] == "PASS"}
+
+
+def _better(before: list[dict], after: list[dict], wanted: set[str]) -> bool:
+    """A change is kept only when the checks it was for now pass, none that passed breaks, and no
+    check fails that didn't fail before."""
+    failing = lambda res: {c["check"] for c in res if c["status"] == "FAIL"}  # noqa: E731
+    return wanted <= _passing(after) and _passing(before) <= _passing(after) and failing(after) <= failing(before)
 
 
 def column(values: dict, n: int, i: int):
@@ -148,6 +215,139 @@ def repair_signs(statement: str, values: dict, labels: dict, n: int, step: float
     return changed
 
 
+def _implied(parts: list[str], total: str, key: str, get) -> list[float]:
+    """The figures for `key` that would make a check add up, the other lines taken as read."""
+    ts = terms(parts)
+    if key == total:
+        return _sums(parts, get)
+    sign = next((sg for sg, k, _ in ts if k == key), None)
+    if sign is None or get(total) is None:
+        return []
+    others = [p for p in parts if p.lstrip("-").rstrip("?~") != key]
+    return [sign * (get(total) - x) for x in _sums(others, get)]
+
+
+def _note(labels: dict, key: str, why: str) -> None:
+    if why not in str(labels.get(key, "")):
+        labels[key] = f"{labels.get(key, key)} ({why})".strip()
+
+
+def repair_by_agreement(statement: str, values: dict, labels: dict, n: int, step: float = 1.0) -> list[dict]:
+    """Put right a line that two failing checks each say is wrong, by the same amount: both checks
+    give it the same figure from other printed lines, so that figure is not a guess (a total read from
+    the line next door, "Total equity and liabilities" taken for total equity). Taken only when both
+    checks then pass and none that passed breaks. Returns what was changed ({key, index, old, new, why})."""
+    changed = []
+    for i in range(n):
+        get = column(values, n, i)
+        for _ in range(4):
+            res = run(statement, get, labels, step)
+            fails = [c for c in res if c["status"] == "FAIL" and c["note"] != ZERO]
+            spec = {name: (parts, total) for st, name, parts, total in CHECKS if st == statement}
+            options: dict[str, list[tuple[str, float]]] = {}
+            for c in fails:
+                parts, total = spec[c["check"]]
+                for k in (*c["parts"], total):
+                    if get(k) is None or str(labels.get(k, "")).startswith(("computed", "formula")):
+                        continue
+                    for v in _implied(parts, total, k, get):
+                        options.setdefault(k, []).append((c["check"], round(v, 3)))
+            fixed = False
+            for k, opts in options.items():
+                for name, v in opts:
+                    agree = {nm for nm, w in opts if abs(w - v) <= tolerance([v, w], step)}
+                    if len(agree) < 2 or abs(v - get(k)) <= tolerance([v, get(k)], step):
+                        continue
+                    old = get(k)
+                    values[k][i] = v
+                    if _better(res, run(statement, get, labels, step), agree):
+                        changed.append({"key": k, "index": i, "old": old, "new": v, "why": f"{len(agree)} totals agree"})
+                        _note(labels, k, f"corrected where {len(agree)} printed totals agree")
+                        fixed = True
+                        break
+                    values[k][i] = old
+                if fixed:
+                    break
+            if not fixed:
+                break
+    return changed
+
+
+def repair_known_slips(statement: str, values: dict, labels: dict, n: int, step: float = 1.0) -> list[dict]:
+    """Readings that can't be right: total equity (or total liabilities) equal to total assets while
+    the other is not nil is the "Total equity and liabilities" line read for it. The figure is worked
+    out from the other two printed totals instead."""
+    if statement != "balance_sheet":
+        return []
+    changed = []
+    for i in range(n):
+        get = column(values, n, i)
+        ta, tl, te = get("total_assets"), get("total_liabilities"), get("total_equity")
+        if ta is None or tl is None or te is None or not ta:
+            continue
+        same = lambda a, b: abs(a - b) <= tolerance([a, b], step)  # noqa: E731
+        for key, other in (("total_equity", tl), ("total_liabilities", te)):
+            if same(get(key), ta) and abs(other) > tolerance([other], step) and not same(other + get(key), ta):
+                old = get(key)
+                values[key][i] = round(ta - other, 3)
+                changed.append({"key": key, "index": i, "old": old, "new": values[key][i],
+                                "why": "'Total equity and liabilities' had been read for it"})
+                _note(labels, key, "corrected: 'Total equity and liabilities' had been read for it")
+                break
+    return changed
+
+
+def try_candidates(normalised: dict, candidates: dict) -> list[str]:
+    """For each failing check, try the figures printed on its lines (`candidates[statement][key]` =
+    [(figure, printed wording)], from textlayer.candidates) in place of the figure read; one is kept
+    only where it makes that check add up without breaking one that passed. A line the reading left
+    out (an optional part) may be filled the same way. Changes `normalised` in place; returns what
+    was changed."""
+    fixed = []
+    for st, block in normalised.items():
+        cand = candidates.get(st) or {}
+        if not cand:
+            continue
+        periods, values, labels = block["periods"], block["values"], block["labels"]
+        n, step = len(periods), block.get("step", 1.0)
+        spec = {name: (parts, total) for s, name, parts, total in CHECKS if s == st}
+        for i, p in enumerate(periods):
+            get = column(values, n, i)
+            for _ in range(4):
+                res = run(st, get, labels, step)
+                progress = False
+                for c in (c for c in res if c["status"] == "FAIL" and c["note"] != ZERO):
+                    parts, total = spec[c["check"]]
+                    for k in [total, *(k for _, k, _ in terms(parts))]:
+                        if str(labels.get(k, "")).startswith(("computed", "formula")) or k not in cand:
+                            continue
+                        had, old = k in values, get(k)
+                        for v, printed in cand[k]:
+                            if old is not None and abs(v - old) <= tolerance([v, old], step):
+                                continue
+                            values.setdefault(k, [None] * n)[i] = v
+                            if _better(res, run(st, get, labels, step), {c["check"]}):
+                                where = p.get("label") or p["period_end"]
+                                fixed.append(f"{k} ({where}) {'blank' if old is None else _fmt(old, 1)} -> {_fmt(v, 1)}, "
+                                             f"as printed on \"{printed}\"")
+                                if old is None and not had:
+                                    labels[k] = f"{printed} (re-read from the PDF's text)"
+                                else:
+                                    _note(labels, k, "re-read from the PDF's text")
+                                progress = True
+                                break
+                            values[k][i] = old
+                        if not had and k in values and all(x is None for x in values[k]):
+                            values.pop(k)
+                        if progress:
+                            break
+                    if progress:
+                        break
+                if not progress:
+                    break
+    return fixed
+
+
 def failures(normalised: dict) -> list[dict]:
     """Every failing check of an extraction, with its period."""
     out = []
@@ -174,8 +374,9 @@ def describe(fails: list[dict], normalised: dict, factor: float = 1.0) -> str:
             lines.append(f"{where}: every figure is 0 ({parts}, {f['total']} {show(f['total'])}), which proves nothing. "
                          "Give these lines' printed figures; a line that isn't printed is left out, not written as 0.")
         else:
+            cause = CAUSES.get(f["check"])
             lines.append(f"{where} fails: {parts} does not equal {f['total']} {show(f['total'])} "
-                         f"(off by {_fmt(f['difference'], factor)})")
+                         f"(off by {_fmt(f['difference'], factor)})" + (f". Look first at: {cause}" if cause else ""))
     return "\n".join(lines)
 
 

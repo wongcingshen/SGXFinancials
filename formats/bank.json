@@ -136,7 +136,7 @@
      "key": "pat_minority",
      "label": "Minority Interests",
      "kind": "item",
-     "hint": "Profit attributable to non-controlling / minority interest; positive for a profit, even where printed as 'Less: Minority Interest'"
+     "hint": "Profit attributable to non-controlling / minority interest; positive for a profit, even where printed as 'Less: Minority Interest'; the line under 'attributable to', not the discontinued operations line"
     },
     {
      "key": "eps_basic",
@@ -235,7 +235,7 @@
      "key": "total_liabilities",
      "label": "Total Liabilities",
      "kind": "total",
-     "hint": "Printed total; leave out if not printed"
+     "hint": "Printed total; leave out if not printed. Never the 'Total equity and liabilities' / 'Total liabilities and equity' line (that equals total assets)."
     },
     {
      "key": "h_equity",
@@ -264,7 +264,7 @@
      "key": "shareholders_equity",
      "label": "Total Shareholders' Equity",
      "kind": "total",
-     "hint": "Equity attributable to owners; leave out if not printed"
+     "hint": "Equity attributable to owners; leave out if not printed (the subtotal before non-controlling interests; ordinary equity when perpetual securities are shown after it)"
     },
     {
      "key": "minority_interests",
@@ -276,7 +276,7 @@
      "key": "total_equity",
      "label": "Total Equity",
      "kind": "total",
-     "hint": "Total equity; leave out if not printed"
+     "hint": "Total equity; leave out if not printed. Never the 'Total equity and liabilities' / 'Total liabilities and equity' line (that equals total assets)."
     }
    ]
   },
@@ -457,7 +457,8 @@
     {
      "key": "cf_net_change",
      "label": "Net Increase/(Decrease) in Cash",
-     "kind": "total"
+     "kind": "total",
+     "hint": "Net increase/(decrease) in cash as printed (it may include exchange differences when the filing prints them above it)"
     },
     {
      "key": "cf_cash_begin",
@@ -470,9 +471,16 @@
      "kind": "item"
     },
     {
+     "key": "cf_other_cash_changes",
+     "label": "Other Changes in Cash",
+     "kind": "item",
+     "hint": "Lines printed between the net change and cash at the end other than exchange rates: cash transferred to/from assets held for sale or a disposal group, bank overdrafts, restricted cash"
+    },
+    {
      "key": "cf_cash_end",
      "label": "Cash at End of Period",
-     "kind": "total"
+     "kind": "total",
+     "hint": "Cash at the end of the period as the cash flow statement's roll-forward gives it, before any reconciliation to the balance sheet printed below it"
     },
     {
      "key": "free_cash_flow",

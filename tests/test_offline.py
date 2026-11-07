@@ -473,7 +473,7 @@ def test_indian_bank_layout_signs_and_checks():
     assert inc["net_interest_income"] == [143_601_100, 140_000_000]
     assert bs["total_equity"] == [1_763_705_700] and bs["total_liabilities"] == [20_550_966_600]
     fails = checks.failures(norm)
-    assert [(f["statement"], f["check"]) for f in fails] == [("cash_flow", "Begin + Net Change + FX = End")], fails
+    assert [(f["statement"], f["check"]) for f in fails] == [("cash_flow", "Begin + Net Change + FX (+ other) = End")], fails
     text = checks.describe(fails, norm, factor=100)
     assert "cf_cash_begin 18,082,312" in text and "off by 2,000,000" in text  # in the filing's own unit
 
@@ -488,7 +488,7 @@ def test_indian_bank_layout_signs_and_checks():
     data, results = workbook_bytes(None, norm, {"company_name": "BANK OF BARODA", "currency": "INR", "format": "bank"})
     statuses = {(c["period"], c["check"]): c["status"] for c in results}
     assert all(s in ("PASS", "derived", "n/a") for s in statuses.values()), [k for k, s in statuses.items() if s == "FAIL"]
-    for name in ("PBT + Tax = PAT (continuing)", "Shareholders + MI (+perps) = PAT (+ associates after tax)",
+    for name in ("PBT + Tax (+ discontinued) = PAT", "Shareholders + MI (+perps) = PAT (+ associates after tax)",
                  "Operating Profit before Allowances + Allowances (+ associates, exceptional) = PBT",
                  "Staff Costs + Other Operating Expenses = Total Operating Expenses"):
         assert statuses[("3M Sep 2026", name)] == "PASS", name
@@ -770,7 +770,8 @@ def test_accuracy_scorer_and_answer_key():
         assert s["counts"]["correct"] == len(key["lines"]), [r for r in s["results"] if r["status"] != "correct"][:3]
 
         # The old mistakes: gross 'Total Income' as total operating income (now netted by the program),
-        # and Operating Expenses taken from the row above (still wrong: only a re-read fixes that).
+        # and Operating Expenses taken from the row above (now put right too: staff + other expenses and
+        # operating income - operating profit both give the printed figure).
         for r in data["income_statement"]["rows"]:
             if r["key"] == "total_operating_income":
                 r["cells"] = [{"col": c["col"], "value": c["value"] + abs(next(x for x in data["income_statement"]["rows"] if x["key"] == "interest_expense")["cells"][i]["value"])}
@@ -778,9 +779,12 @@ def test_accuracy_scorer_and_answer_key():
             if r["key"] == "total_operating_expenses":
                 r["cells"][5]["value"] = -2877332
         old = Path(d) / "old.xlsx"
-        old.write_bytes(workbook_bytes(None, extractor.normalise(data), {"company_name": "BANK OF BARODA", "format": "bank"})[0])
+        norm = extractor.normalise(data)
+        assert any(c.startswith("total_operating_expenses") for c in norm["income_statement"]["corrected"]), norm["income_statement"].get("corrected")
+        assert "totals agree" in norm["income_statement"]["labels"]["total_operating_expenses"]
+        old.write_bytes(workbook_bytes(None, norm, {"company_name": "BANK OF BARODA", "format": "bank"})[0])
         wrong = [(r["key"], r["months"]) for r in score(old, key)["results"] if r["status"] != "correct"]
-        assert wrong == [("total_operating_expenses", 12)], wrong
+        assert wrong == [], wrong
 
 
 def test_gemini_steps_down_from_settings_a_model_rejects():
@@ -954,6 +958,142 @@ def highlights():
     return d
 
 
+def test_real_filings_that_failed_their_checks():
+    """Singapore Post 1H FY2027 and Fu Yu 9M 2026: the figures as printed, and the slips that were made."""
+    from sgx_fin import checks
+
+    def reading(st_rows: dict, periods: dict) -> dict:
+        d = {"company_name": "X", "format": "general", "currency": "SGD", "unit": "thousands", "basis": "Group"}
+        for st, rows in st_rows.items():
+            d[st] = {"page_numbers": [1], "periods": periods[st],
+                     "rows": [{"key": k, "source_label": k, "cells": [{"col": c + 1, "value": v} for c, v in enumerate(vals) if v is not None]}
+                              for k, vals in rows.items()]}
+        return d
+
+    half = [{"col": 1, "label": "1H2027", "period_end": "2026-09-30", "months": 6},
+            {"col": 2, "label": "1H2026", "period_end": "2025-09-30", "months": 6}]
+    spl = reading({
+        "income_statement": {"revenue": [185_867, 188_408], "profit_before_tax": [52_459, 21_437], "tax": [3_450, -878],
+                             "discontinued_ops": [None, -2_188], "profit_after_tax": [55_909, 18_371],
+                             "pat_shareholders": [55_909, 19_707], "pat_minority": [None, -1_336]},
+        "balance_sheet": {"total_ca": [697_803], "total_nca": [1_367_497], "total_assets": [2_065_300], "total_cl": [302_868],
+                          "total_ncl": [295_382], "total_liabilities": [598_250], "net_assets": [1_467_050],
+                          "share_capital": [638_762], "treasury_shares": [-25_971], "reserves": [602_695],
+                          "shareholders_equity": [1_215_486], "perpetual_securities": [251_564], "total_equity": [1_467_050]},
+        "cash_flow": {"cf_net_operating": [5_944, -28_087], "cf_net_investing": [20_848, 147_336],
+                      "cf_net_financing": [-23_195, -217_276], "cf_net_change": [3_597, -98_027],
+                      "cf_cash_begin": [534_353, 696_420], "cf_other_cash_changes": [None, -4_304],
+                      "cf_fx_effect": [1_073, None], "cf_cash_end": [539_023, 594_089]},
+    }, {"income_statement": half, "cash_flow": half,
+        "balance_sheet": [{"col": 1, "label": "30 Sep 2026", "period_end": "2026-09-30", "months": 0}]})
+    # Read as printed, everything ties: profit after tax includes the discontinued loss, perpetual securities
+    # sit after ordinary equity, and cash transferred to assets held for sale has its own line.
+    assert not checks.failures(extractor.normalise(spl)), checks.failures(extractor.normalise(spl))
+    assert checks.verdict(extractor.normalise(spl))["pass"] >= 12
+    # The slip that was made: the discontinued loss read for the minority's share. One total says so;
+    # nothing else confirms a figure, so it is left for a re-read, pointed at the 'attributable to' lines.
+    slip = json.loads(json.dumps(spl))
+    next(r for r in slip["income_statement"]["rows"] if r["key"] == "pat_minority")["cells"] = [{"col": 2, "value": -2_188}]
+    norm = extractor.normalise(slip)
+    fails = checks.failures(norm)
+    assert [(f["check"], f["difference"]) for f in fails] == [("Shareholders + MI (+perps) = PAT (+ associates after tax)", -852)]
+    assert "attributable to" in checks.describe(fails, norm)
+    # Without a line for it, the cash moved to assets held for sale was a failure no reading could fix.
+    old = json.loads(json.dumps(spl))
+    old["cash_flow"]["rows"] = [r for r in old["cash_flow"]["rows"] if r["key"] != "cf_other_cash_changes"]
+    fails = checks.failures(extractor.normalise(old))
+    assert [f["difference"] for f in fails] == [4_304] and "cf_other_cash_changes" in checks.describe(fails, extractor.normalise(old))
+
+    fuyu = reading({"balance_sheet": {
+        "total_nca": [54_897, 59_141], "total_ca": [113_218, 105_843], "total_assets": [168_115, 164_984],
+        "share_capital": [103_770, 103_770], "reserves": [23_584, 24_421], "shareholders_equity": [127_354, 128_191],
+        "total_ncl": [7_658, 7_377], "total_cl": [33_103, 29_416], "total_liabilities": [40_761, 36_793],
+        "total_equity": [168_115, 164_984]}},  # 'Total equity and liabilities' read as total equity
+        {"balance_sheet": [{"col": 1, "label": "30 Sep 2026", "period_end": "2026-09-30", "months": 0},
+                           {"col": 2, "label": "31 Dec 2025", "period_end": "2025-12-31", "months": 0}]})
+    norm = extractor.normalise(fuyu)
+    assert norm["balance_sheet"]["values"]["total_equity"] == [127_354, 128_191]
+    assert not checks.failures(norm) and len(norm["balance_sheet"]["corrected"]) == 2
+    assert "Total equity and liabilities" in norm["balance_sheet"]["labels"]["total_equity"]
+    # Without the owners' subtotal, total assets - total liabilities still gives it.
+    for r in fuyu["balance_sheet"]["rows"]:
+        if r["key"] == "shareholders_equity":
+            r["cells"] = []
+    assert extractor.normalise(fuyu)["balance_sheet"]["values"]["total_equity"] == [127_354, 128_191]
+
+    # Assets held for sale printed after the current assets subtotal (31 Mar 2026): either subtotal ties.
+    for total_ca, ahs in ((663_174, 6_360), (669_534, 6_360), (669_534, None)):
+        bs = {"total_nca": 1_371_802.0, "total_ca": float(total_ca), "assets_held_for_sale": ahs, "total_assets": 2_041_336.0}
+        assert [c["status"] for c in checks.run("balance_sheet", bs.get) if c["status"] != "n/a"] == ["PASS"], (total_ca, ahs)
+
+    # Panasonic 1H FY2027 (yen millions): exchange differences printed above the net change, inside it.
+    pana = {"cf_net_operating": 323_082.0, "cf_net_investing": -239_732.0, "cf_net_financing": -87_555.0,
+            "cf_fx_effect": -4_521.0, "cf_net_change": -8_726.0, "cf_cash_begin": 770_179.0, "cf_cash_end": 761_453.0}
+    assert [c["status"] for c in checks.run("cash_flow", pana.get, step=1_000)] == ["PASS", "PASS"]
+    pana["cf_net_change"] = -4_205.0  # the usual layout: the net change before exchange differences
+    assert [c["status"] for c in checks.run("cash_flow", pana.get, step=1_000)] == ["PASS", "PASS"]
+    pana["cf_cash_end"] = 761_543.0  # but a misread digit still fails
+    assert [c["status"] for c in checks.run("cash_flow", pana.get, step=1_000)] == ["PASS", "FAIL"]
+
+    # A total that only one check questions is never changed: there is nothing to say which line is wrong.    # A total that only one check questions is never changed: there is nothing to say which line is wrong.
+    one = json.loads(json.dumps(spl))
+    next(r for r in one["balance_sheet"]["rows"] if r["key"] == "total_ca")["cells"][0]["value"] += 1_000
+    norm = extractor.normalise(one)
+    assert norm["balance_sheet"]["values"]["total_ca"] == [698_803] and "corrected" not in norm["balance_sheet"]
+
+
+def test_failing_lines_are_reread_from_the_pdf_text():
+    """Text filings: the figures printed on a failing check's lines are tried from the PDF's own text
+    (no AI), and kept only where the check then adds up. Lines as pdfium gives Singapore Post's pages."""
+    from sgx_fin import checks, textlayer
+
+    assert textlayer.parse_line("Non-controlling interests - (1,336) N.M.") == ("Non-controlling interests", [-1336.0])
+    assert textlayer.parse_line("Exceptional items 5 44,416 13,939 218.6") == ("Exceptional items", [5.0, 44416.0, 13939.0, 218.6])
+    assert textlayer.parse_line("Revenue 31,607 31,224 1.2% 91,601") == ("Revenue", [31607.0, 31224.0, 91601.0])
+    assert textlayer.parse_line("Profit attributable to:") == ("Profit attributable to:", [])
+
+    income = ("Profit after tax 55,909 18,371 204.3 \r\nProfit attributable to:\r\n"
+              "Equity holders of the Company 55,909 19,707 183.7 \r\nNon-controlling interests - (1,336) N.M. \r\n"
+              "55,909 18,371 204.3 \r\nUnderlying net profit 2 11,494 5,540 107.5")
+    cash = ("Net increase/(decrease) in cash and cash equivalents 3,597 (98,027) \r\n"
+            "Cash and cash equivalents at beginning of financial period 534,353 696,420 \r\n"
+            "Changes in cash and cash equivalents transferred to assets held for sale 3\r\n - (4,304) \r\n"
+            "Effects of currency translation on cash and cash equivalents 1,073 - \r\n"
+            "Cash and cash equivalents at end of financial period 539,023 594,089 ")
+    half = [{"col": 1, "label": "1H2027", "period_end": "2026-09-30", "months": 6},
+            {"col": 2, "label": "1H2026", "period_end": "2025-09-30", "months": 6}]
+    row = lambda k, label, *vals: {"key": k, "source_label": label,  # noqa: E731
+                                   "cells": [{"col": c + 1, "value": v} for c, v in enumerate(vals) if v is not None]}
+    data = {"company_name": "SINGAPORE POST", "format": "general", "unit": "thousands",
+            "income_statement": {"page_numbers": [1], "periods": half, "rows": [
+                row("profit_before_tax", "Profit before tax", 52_459, 21_437), row("tax", "Income tax", 3_450, -878),
+                row("discontinued_ops", "Loss for the period from discontinued operations", None, -2_188),
+                row("profit_after_tax", "Profit after tax", 55_909, 18_371),
+                row("pat_shareholders", "Equity holders of the Company", 55_909, 19_707),
+                row("pat_minority", "Loss for the period from discontinued operations", None, -2_188)]},  # the slip
+            "cash_flow": {"page_numbers": [2], "periods": half, "rows": [
+                row("cf_net_operating", "Net cash from operating activities", 5_944, -28_087),
+                row("cf_net_investing", "Net cash from investing activities", 20_848, 147_336),
+                row("cf_net_financing", "Net cash used in financing activities", -23_195, -217_276),
+                row("cf_net_change", "Net increase/(decrease) in cash and cash equivalents", 3_597, -98_027),
+                row("cf_cash_begin", "Cash and cash equivalents at beginning of financial period", 534_353, 696_420),
+                row("cf_fx_effect", "Effects of currency translation", 1_073, None),
+                row("cf_cash_end", "Cash and cash equivalents at end of financial period", 539_023, 594_089)]}}
+    norm = extractor.normalise(data)
+    assert len(checks.failures(norm)) == 2
+    took = checks.try_candidates(norm, textlayer.candidates({"income_statement": [income], "cash_flow": [cash]}, norm))
+    assert len(took) == 2 and not checks.failures(norm), took
+    assert norm["income_statement"]["values"]["pat_minority"] == [None, -1_336]  # found by its wording, not the AI's label
+    assert norm["cash_flow"]["values"]["cf_other_cash_changes"] == [None, -4_304]  # figures wrapped onto the next line
+    assert "re-read from the PDF's text" in norm["income_statement"]["labels"]["pat_minority"]
+    # Nothing printed makes a wrong figure add up: it is left alone for the AI's second look.
+    wrong = extractor.normalise(data)
+    wrong["cash_flow"]["values"]["cf_cash_begin"] = [534_353, 696_402]
+    before = len(checks.failures(wrong))
+    checks.try_candidates(wrong, textlayer.candidates({"cash_flow": ["Unrelated line 1,234 5,678"]}, wrong))
+    assert len(checks.failures(wrong)) == before and wrong["cash_flow"]["values"]["cf_cash_begin"] == [534_353, 696_402]
+
+
 def test_checks_that_prove_nothing_fail():
     from sgx_fin import checks
 
@@ -982,12 +1122,21 @@ def test_checks_that_prove_nothing_fail():
     # The slack is the rounding of the figures, not 0.2% of the total: a 300 misread in 199,000 fails.
     misread = json.loads(json.dumps(FAKE))
     misread["balance_sheet"]["rows"][2]["values"][0] += 300  # total assets
-    assert {f["check"] for f in checks.failures(extractor.normalise(misread))} == {
+    raw = {r["key"]: r["values"][0] * 1.0 for r in misread["balance_sheet"]["rows"]}
+    assert {c["check"] for c in checks.run("balance_sheet", raw.get) if c["status"] == "FAIL"} == {
         "NCA + CA = Total Assets", "Total Liabilities + Total Equity = Total Assets"}
+    # Both of those checks give total assets the same figure, so the program puts the misread right.
+    fixed = extractor.normalise(misread)
+    assert not checks.failures(fixed) and fixed["balance_sheet"]["corrected"][0].startswith("total_assets")
     assert checks.tolerance([100, 50, 150], 1) == 2  # thousands: two of the filing's units
-    assert checks.tolerance([123_456_700, 2_000, 123_458_700], 10_000) == 2_000  # crores printed to 0.1 crore
-    assert checks.tolerance([1_234.567, 1.0, 1_235.567], 0.001) == 0.002  # units: two dollars, not two thousand
+    # crores printed to 0.1 crore: 0.005% of the total (0.6 crore) is rounding, under the cap of 10 x 0.1 crore
+    assert round(checks.tolerance([123_456_700, 2_000, 123_458_700], 10_000)) == 6_173
+    assert checks.tolerance([1_234.567, 1.0, 1_235.567], 0.001) == 0.01  # units: ten dollars at most, not thousands
     assert checks.tolerance([10, 20, 30, 40, 50, 60, 70, 80, 90, 100], 1) == 5  # ten rounded figures
+    # Large totals get up to 10 of the filing's units, never a share of the total: 2bn of total assets in
+    # '000 allows 10, so a misread digit in the tens or above still fails.
+    assert checks.tolerance([1_367_497, 697_803, 2_065_300], 1) == 10
+    assert checks.tolerance([20_000_000_000, 5_000, 20_000_005_000], 1) == 10
 
     # Highlights only: nothing passes, statements and gross profit missing -> not verified, and why.
     v = checks.verdict(extractor.normalise(highlights()), "16:9 slides")
@@ -1479,13 +1628,21 @@ def test_mcp_connector():
         assert wb["Income Statement"]["B1"].value is not None or wb["Income Statement"]["A1"].value
         assert client.get(f"{u.path}?{u.query.replace('&s=', '&s=0')}").status_code == 403  # tampered signature
 
-        # A misread total comes back with the lines to read again.
+        # A misread total that two printed totals agree on is put right, and Claude is told so.
         wrong = copy.deepcopy(data)
         for row in wrong["balance_sheet"]["rows"]:
             if row["key"] == "total_assets":
                 row["cells"][0]["value"] += 900
         text = call("submit_statements", {"extraction": wrong})["content"][0]["text"]
-        assert "FAIL" in text and "total_assets" in text and "Verdict: NOT VERIFIED: 2 tie-out checks fail" in text
+        assert "Put right by the program" in text and "total_assets" in text and "Verdict: OK" in text, text
+        # One that only one total disagrees with comes back with the lines to read again, and what to look at.
+        wrong = copy.deepcopy(data)
+        for row in wrong["balance_sheet"]["rows"]:
+            if row["key"] == "total_ca":
+                row["cells"][0]["value"] += 900
+        text = call("submit_statements", {"extraction": wrong})["content"][0]["text"]
+        assert "FAIL" in text and "total_ca" in text and "Verdict: NOT VERIFIED: 1 tie-out check fails" in text, text
+        assert "Look first at:" in text
 
         # A good reading is confirmed; highlights are not, and Claude is told what to do about it.
         text = call("submit_statements", {"extraction": data, "filing": "1H2026"})["content"][0]["text"]

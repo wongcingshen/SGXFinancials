@@ -112,7 +112,7 @@
      "key": "profit_after_tax",
      "label": "Profit After Tax",
      "kind": "total",
-     "hint": "Profit/(loss) for the year/period from continuing + discontinued operations"
+     "hint": "Profit/(loss) for the year/period from continuing + discontinued operations (the total that the 'attributable to' lines add up to), not the continuing operations subtotal"
     },
     {
      "key": "discontinued_ops",
@@ -130,7 +130,7 @@
      "key": "pat_minority",
      "label": "Minority Interests",
      "kind": "item",
-     "hint": "Profit attributable to non-controlling interests"
+     "hint": "Profit attributable to non-controlling interests; the line under 'attributable to', not the discontinued operations line"
     },
     {
      "key": "perpetual_holders",
@@ -255,7 +255,8 @@
     {
      "key": "assets_held_for_sale",
      "label": "Assets Held for Sale",
-     "kind": "item"
+     "kind": "item",
+     "hint": "Assets (of a disposal group) classified as held for sale, whether printed inside or after the current assets subtotal"
     },
     {
      "key": "other_ca",
@@ -266,7 +267,8 @@
     {
      "key": "total_ca",
      "label": "Total Current Assets",
-     "kind": "total"
+     "kind": "total",
+     "hint": "Total current assets as printed (with or without assets held for sale printed after it)"
     },
     {
      "key": "total_assets",
@@ -306,12 +308,19 @@
      "key": "other_cl",
      "label": "Other Current Liabilities",
      "kind": "item",
-     "hint": "Provisions, derivatives, liabilities held for sale, other current liabilities"
+     "hint": "Provisions, derivatives, other current liabilities (liabilities held for sale have their own line)"
+    },
+    {
+     "key": "liabilities_held_for_sale",
+     "label": "Liabilities Held for Sale",
+     "kind": "item",
+     "hint": "Liabilities directly associated with assets held for sale, whether printed inside or after the current liabilities subtotal"
     },
     {
      "key": "total_cl",
      "label": "Total Current Liabilities",
-     "kind": "total"
+     "kind": "total",
+     "hint": "Total current liabilities as printed (with or without liabilities held for sale printed after it)"
     },
     {
      "key": "h_ncl",
@@ -349,13 +358,14 @@
     {
      "key": "total_liabilities",
      "label": "Total Liabilities",
-     "kind": "total"
+     "kind": "total",
+     "hint": "Total liabilities as printed. Never the 'Total equity and liabilities' / 'Total liabilities and equity' line (that equals total assets)."
     },
     {
      "key": "net_assets",
      "label": "Net Assets",
      "kind": "total",
-     "hint": "Total assets minus total liabilities"
+     "hint": "Net assets as printed (total assets minus total liabilities); leave out if not printed"
     },
     {
      "key": "h_eq",
@@ -389,7 +399,7 @@
      "key": "shareholders_equity",
      "label": "Total Shareholders' Equity",
      "kind": "total",
-     "hint": "Equity attributable to owners of the Company"
+     "hint": "Equity attributable to owners of the Company (the subtotal before non-controlling interests; ordinary equity when perpetual securities are shown after it)"
     },
     {
      "key": "minority_interests",
@@ -400,7 +410,8 @@
     {
      "key": "total_equity",
      "label": "Total Equity",
-     "kind": "total"
+     "kind": "total",
+     "hint": "Total equity: owners' equity + perpetual securities + non-controlling interests. Never the 'Total equity and liabilities' / 'Total liabilities and equity' line (that equals total assets)."
     }
    ]
   },
@@ -581,7 +592,8 @@
     {
      "key": "cf_net_change",
      "label": "Net Increase/(Decrease) in Cash",
-     "kind": "total"
+     "kind": "total",
+     "hint": "Net increase/(decrease) in cash as printed (it may include exchange differences when the filing prints them above it)"
     },
     {
      "key": "cf_cash_begin",
@@ -594,9 +606,16 @@
      "kind": "item"
     },
     {
+     "key": "cf_other_cash_changes",
+     "label": "Other Changes in Cash",
+     "kind": "item",
+     "hint": "Lines printed between the net change and cash at the end other than exchange rates: cash transferred to/from assets held for sale or a disposal group, bank overdrafts, restricted cash"
+    },
+    {
      "key": "cf_cash_end",
      "label": "Cash at End of Period",
-     "kind": "total"
+     "kind": "total",
+     "hint": "Cash at the end of the period as the cash flow statement's roll-forward gives it, before any reconciliation to the balance sheet printed below it"
     },
     {
      "key": "free_cash_flow",

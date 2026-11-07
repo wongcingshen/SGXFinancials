@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from . import checks, extractor, industries, pictures
+from . import checks, extractor, industries, pictures, textlayer
 from .checks import STATEMENT_NAMES, join_or
 from .page_scanner import ScanResult, page_texts, scan_pdf
 from .sgx_client import Announcement, SGXClient
@@ -180,8 +180,35 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
     if reading:
         pictures._add_usage(usage, reading.usage)
 
-    # Totals that don't add up, or gross profit left blank: one more look, pointed at the failing lines
-    # (from the copied tables for pictures, which is quick; from the pages otherwise).
+    def found(st: str) -> list[int]:
+        nums = [n for n in (ex.data.get(st) or {}).get("page_numbers", []) if isinstance(n, int)]
+        if reading:  # the template step was told the original page numbers
+            return sorted({n for n in nums if n in reading.pages})
+        return sorted({pages[n - 1] for n in nums if 1 <= n <= len(pages)})
+
+    # Text pages: a figure that doesn't add up is looked for on its line in the PDF's own text first
+    # (free, exact digits); one is kept only where it makes the totals add up.
+    texts = None
+
+    def from_text() -> list[str]:
+        nonlocal texts
+        if vision or not checks.failures(normalised):
+            return []
+        try:
+            if texts is None:
+                texts = textlayer.read_texts(pdf, {st: found(st) or pages for st in normalised})
+            took = checks.try_candidates(normalised, textlayer.candidates(texts, normalised))
+        except Exception as e:  # a damaged text layer only costs this shortcut
+            notes.append(f"Reading the failing lines from the PDF's text failed ({e}).")
+            return []
+        if took:
+            notes.append("Re-read from the PDF's text: " + "; ".join(took) + ".")
+        return took
+
+    from_text()
+
+    # Totals that still don't add up, or gross profit left blank: one more look, pointed at the failing
+    # lines (from the copied tables for pictures, which is quick; from the pages otherwise).
     fails = checks.failures(normalised)
     gaps = checks.gross_profit_gaps(normalised)
     rechecked = None
@@ -190,7 +217,7 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
         try:
             ex2 = run(checks.describe(fails, normalised, factor), checks.describe_gaps(gaps, normalised) if gaps else "")
             second = extractor.normalise(ex2.data, formats, cogs)
-            fixed = checks.reconcile(normalised, second)
+            fixed = checks.reconcile(normalised, second) + from_text()
             filled = extractor.fill_gross_profit(normalised, second) if gaps else []
             pictures._add_usage(usage, ex2.usage)
             rechecked = {"failed": len(fails), "fixed": fixed, "still_failing": len(checks.failures(normalised)),
@@ -198,12 +225,9 @@ def process_pdf(pdf: Path, scan: ScanResult | None = None, pages: list[int] | No
                          "gross_profit_still_blank": len(checks.gross_profit_gaps(normalised))}
         except Exception as e:
             notes.append(f"A second look at the failing checks failed: {e}")
-
-    def found(st: str) -> list[int]:
-        nums = [n for n in (ex.data.get(st) or {}).get("page_numbers", []) if isinstance(n, int)]
-        if reading:  # the template step was told the original page numbers
-            return sorted({n for n in nums if n in reading.pages})
-        return sorted({pages[n - 1] for n in nums if 1 <= n <= len(pages)})
+    corrected = [c for b in normalised.values() for c in b.get("corrected") or []]
+    if corrected:
+        notes.append("Put right where two printed totals agree: " + "; ".join(corrected) + ".")
 
     result.normalised = normalised
     result.usage = usage

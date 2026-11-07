@@ -198,6 +198,8 @@ Rules:
   - bank format: gross income (revenue) is interest income + non-interest income ('Total Income' when printed as one line); interest expense, operating expenses and allowances go to their own keys as well as into `lines`.
 - Other totals (net interest income, total assets, net cash from operating activities...) must be the printed totals, not your own arithmetic, when they are printed; leave them out when not printed.
 - `page_numbers` are the page numbers within the attached excerpt (1-based) the statement came from.
+- Lines that are often mixed up: profit_after_tax is the profit for the period from continuing AND discontinued operations (the figure the "attributable to" lines add up to), with the discontinued line in discontinued_ops; pat_shareholders / pat_minority / perpetual_holders come only from the lines under "attributable to"; total_equity and total_liabilities are never the "Total equity and liabilities" line (that is total assets); a line between the net change in cash and cash at the end (cash transferred to assets held for sale, bank overdrafts) goes in cf_other_cash_changes.
+- Before you answer, add up every column yourself: PBT + tax (+ discontinued) = profit after tax; attributable lines = profit after tax; non-current + current assets = total assets; current + non-current liabilities = total liabilities; total liabilities + total equity = total assets; owners' equity (+ perpetual securities) + non-controlling interests = total equity; operating + investing + financing = net change in cash; cash at the beginning + net change + exchange differences (+ other changes) = cash at the end. If one doesn't add up, read its lines again (digit, column, sign, the line next door, a subtotal taken for a total) and correct them; never adjust a figure to force a total.
 - Put caveats (restatements, unusual presentation, standalone figures used) in `notes`.
 
 Template keys:
@@ -1005,6 +1007,10 @@ def normalise(data: dict, formats: dict | None = None, cogs: dict | None = None)
         if st == "income_statement":
             _net_bank_income(values, labels, n, factor)
         checks.repair_signs(st, values, labels, n, factor)
+        # A line two printed totals agree is wrong (or 'Total equity and liabilities' read as total
+        # equity) is worked out from those totals; the label says so.
+        corrected = (checks.repair_known_slips(st, values, labels, n, factor)
+                     + checks.repair_by_agreement(st, values, labels, n, factor))
         # Derived lines work by meaning (key), whatever the format calls them; each only fills a
         # line the filing didn't print, from parts the filing did print.
         _derive_bank(st, values, labels, n)
@@ -1028,6 +1034,9 @@ def normalise(data: dict, formats: dict | None = None, cogs: dict | None = None)
             labels["free_cash_flow"] = "computed: net operating cash flow + capex"
         # step: output units per unit of the filing (100 for lakhs), for rounding tolerance in checks
         out[st] = {"periods": periods, "values": values, "labels": labels, "format": fmt, "step": factor}
+        if corrected:
+            out[st]["corrected"] = [f"{c['key']} ({periods[c['index']].get('label') or periods[c['index']]['period_end']}) "
+                                    f"{c['old']:,.0f} -> {c['new']:,.0f} '000: {c['why']}" for c in corrected]
         if basis:
             out[st]["cogs_basis"] = basis
     return out
