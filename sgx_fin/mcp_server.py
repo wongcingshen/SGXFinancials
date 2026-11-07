@@ -613,7 +613,7 @@ def results_text(ctx: Context, normalised: dict, meta: dict, formats: dict, head
         lines += ["", f"No {checks.join_or(missing)} was read. Find {it} in the filing (open_filing with pages=[...] "
                       f"shows any page) and submit again, or tell the user the filing doesn't have {it}."]
     lines += [_figures_table(normalised, formats), "", f"Excel workbook (Income Statement, Balance Sheet, Cash Flow, "
-              f"Checks, Source Map): {link}",
+              f"Checks, Source Map): {link}", f"CSV (one row per figure, for data tools): {link}&fmt=csv",
               "To add these periods to an earlier workbook, upload it in the web app under Settings → Merge."]
     return _text("\n".join(lines))
 

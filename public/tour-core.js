@@ -60,7 +60,7 @@ export const CHAPTERS = [
       { id: "details", target: "details", tapAdvances: true, title: "Open the details",
         body: "Tap the company name to see which PDF and pages were read, every check with its difference, and the tokens used. If the scan picked the wrong pages, enter the right ones there and extract again." },
       { id: "excel", target: "excel", title: "Download the workbook",
-        body: "Sheets for the income statement, balance sheet and cash flow, plus Checks and a Source Map back to the company’s own labels. The workbook is built in memory: nothing is stored on the server." },
+        body: "Sheets for the income statement, balance sheet and cash flow, plus Checks and a Source Map back to the company’s own labels. CSV gives the same figures as one row per figure, for data tools. Both are built in memory: nothing is stored on the server." },
       { id: "recheck", target: "recheck", title: "Not verified? Ask Claude",
         body: "Check with Claude opens a Claude chat that reads the filing itself through the SGX Financials connector and replies with a new Excel link. Add the connector first (Make it yours, below)." },
     ],

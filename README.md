@@ -115,6 +115,14 @@ SGX page URL ──► announcements ──► PDF attachments ──► keyword
 7. **Excel** (`sgx_fin/excel_writer.py`): rescales to `'000`, writes the sheets in the chosen format,
    reports the tie-out checks and **merges** new periods into an existing workbook so
    quarters/half-years/full years accumulate.
+8. **CSV** (`sgx_fin/csv_writer.py`): every workbook comes with a CSV of the same figures in "long" form,
+   one row per figure, for databases, pandas, BI tools and diffs:
+   `stock_code, company, currency, statement, line_key, line, company_label, period_end, months, period,
+   value, unit, verified, filing, source_pdf, pages` (unit: thousands, millions…; EPS in cents). It is made from the workbook's own store, so it holds
+   every period merged into it, in the same unit and signs as the statement sheets (your standard's when
+   there is one). The workbook stays the master copy: merging, Checks, Source Map, COGS Basis
+   and Transcription live only there. The web app offers it next to **Excel** (and saves / zips it with the
+   workbook), the connector's link gives it with `&fmt=csv`, and the CLI writes `output/<code>.csv`.
 
 **Statements as pictures** (`sgx_fin/pictures.py`). Scanned and photographed filings go wrong
 in different ways, so each step deals with one of them:

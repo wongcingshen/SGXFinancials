@@ -5,7 +5,7 @@ Routes (the operation is also accepted as ?op=health|screen|process on any path)
   GET  /api/screen?url=...&company=   list announcements for an SGX page URL (token or browser)
   POST /api/process                   scan (+ extract) one filing, return workbook
   POST /api/mcp?op=mcp&key=...        MCP connector for Claude (sgx_fin/mcp_server.py)
-  GET  /api/download?op=download&d=&s= a workbook from a connector result's signed link
+  GET  /api/download?op=download&d=&s= a workbook from a connector result's signed link (&fmt=csv: the CSV)
   GET  /api/industries                the built-in industries and their cost of goods sold rules
   POST /api/recompute                 a filing's COGS from the lines the user ticked (no AI), new workbook
   POST /api/learn_standard            the statement standard(s) of a finished workbook the user uploads (.xlsx/.csv),
@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 from sgx_fin import extractor
+from sgx_fin.csv_writer import workbook_csv
 from sgx_fin.excel_writer import workbook_bytes
 from sgx_fin.pipeline import (attachment_name, choose_financial_pdf, default_pages, not_results_reason,
                               pick_best_pdf, process_pdf)
@@ -357,6 +358,7 @@ def process():
         verdict=res.meta.get("verdict"),  # this filing's own: ok only when its figures are confirmed
         normalised=res.normalised,  # sent back to /api/recompute when the user corrects the COGS lines
         filename=f"{name}.xlsx", workbook_b64=base64.b64encode(data).decode(),
+        csv_filename=f"{name}.csv", csv_b64=base64.b64encode(workbook_csv(data, formats)).decode(),
     )
 
 
@@ -387,7 +389,8 @@ def recompute():
     data, results = workbook_bytes(existing, normalised, meta, formats)
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", meta.get("stock_code") or meta.get("company_name") or "").strip("_") or "financials"
     return jsonify(normalised=normalised, meta=meta, verdict=meta["verdict"], checks=results, chosen=chosen,
-                   filename=f"{name}.xlsx", workbook_b64=base64.b64encode(data).decode())
+                   filename=f"{name}.xlsx", workbook_b64=base64.b64encode(data).decode(),
+                   csv_filename=f"{name}.csv", csv_b64=base64.b64encode(workbook_csv(data, formats)).decode())
 
 
 # ------------------------------------------------------------------ MCP connector for Claude
@@ -431,5 +434,8 @@ def download():
         return jsonify(error="This download link is damaged; ask Claude for the link again."), 400
     data, _ = workbook_bytes(None, normalised, meta, formats)  # in the user's standard when the link carries one
     name = re.sub(r"[^A-Za-z0-9._-]+", "_", meta.get("stock_code") or meta.get("company_name") or "").strip("_") or "financials"
+    if request.args.get("fmt") == "csv":  # the same figures, one row per figure
+        return Response(workbook_csv(data, formats), mimetype="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}.csv"'})
     return Response(data, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
