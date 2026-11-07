@@ -265,6 +265,12 @@ yellow, Fraunces + Outfit, rounded cards, one accent colour per company):
   can still be downloaded (marked not verified). **Slides only** cards offer **Ask Claude**, and
   extraction errors **Read it with Claude** in the details.
 - **Extract all** works through every card (two at a time) and becomes **Download all** (zip).
+  When some figures aren't verified, **Check N with Claude** sits beside it: one Claude chat gets those
+  filings together (each with its failing checks and statement pages) and re-reads them one by one
+  through the connector, replying with an Excel link for each. A chat takes up to four filings, since each
+  re-check reads its pages as images; with more, the button reads "Check 4 of 9 with Claude" and the next
+  click opens the next chat. The cards sent are marked "Sent to Claude"; the new workbooks arrive in the
+  chat, not in Download all or the download folder.
 - **Choose download folder** (Chrome / Edge): every workbook is saved straight into that folder,
   one file per company, and a new filing is merged into the company's file already there.
 - **My standards** (header): upload results you already have in Excel or CSV, and each company's next

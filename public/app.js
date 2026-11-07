@@ -408,6 +408,13 @@ function renderBulk() {
   } else {
     if (done.length > 1 || (done.length && !todo.length && !working))
       html += `<button type="button" class="btn ${todo.length ? "btn-outline" : "btn-ember"}" id="bulkZip" data-tour="download-all">${icon("download")}Download all (${done.length})</button>`;
+    const claude = nextBatch();
+    if (claude.list.length) {
+      const n = claude.list.length, all = claude.left;
+      html += `<button type="button" class="btn btn-outline" id="bulkClaude" data-tour="recheck-all" title="${
+        n < all ? `Opens a Claude chat that re-reads the first ${n} of the ${all} filings whose figures aren't verified` : `Opens one Claude chat that re-reads ${all === 1 ? "the filing" : `the ${all} filings`} whose figures aren't verified`
+      } through the SGX Financials connector and replies with an Excel link for each">${icon("sparkles")}${n < all ? `Check ${n} of ${all} with Claude` : `Check ${all} with Claude`}</button>`;
+    }
     if (todo.length > 1 || (todo.length && !done.length))
       html += `<button type="button" class="btn btn-ember" id="bulkRun" data-tour="extract-all">${icon("sparkles")}Extract all (${todo.length})</button>`;
   }
@@ -688,7 +695,7 @@ async function extractAll() {
   // couldn't (no folder, or this browser can't write to one) come down now as one zip.
   const unsaved = done.filter((a) => !a.job.saved);
   const where = state.folderOk && state.dir ? ` and saved to “${state.dir.name}”` : "";
-  toast(`Extract all finished: ${done.length} workbook${done.length === 1 ? "" : "s"} ready${done.length > unsaved.length ? where : ""}${unverified ? `, ${unverified} not verified (Check with Claude)` : ""}.`);
+  toast(`Extract all finished: ${done.length} workbook${done.length === 1 ? "" : "s"} ready${done.length > unsaved.length ? where : ""}${unverified ? `, ${unverified} not verified: “Check with Claude” sends ${unverified === 1 ? "it" : "them"} to Claude in one go` : ""}.`);
   if (unsaved.length) await downloadAll(unsaved);
 }
 
@@ -1302,11 +1309,9 @@ const CLAUDE_MODEL = "Opus 5.5";
 const ASK_SECONDS = 30;
 let askChain = Promise.resolve();
 
-// What Claude is asked, by why: "photos" (statements that are pictures), "recheck" (the server's AI read
-// it but the figures aren't verified), "skipped" (set aside without AI, e.g. slides only), "failed".
-function claudePrompt(a, why = "photos") {
-  const j = a.job, res = j.result;
-  const used = (j.scan || res)?.scan?.used_url;
+// A filing's statement pages and failing checks, as a re-check points Claude at them.
+function recheckInfo(a) {
+  const res = a.job.result;
   const v = res ? verdictOf(res) : null;
   const found = Object.values(res?.meta?.found_pages || {}).flat();
   const pages = [...new Set(found.length ? found : res?.pages || [])].sort((x, y) => x - y);
@@ -1314,11 +1319,35 @@ function claudePrompt(a, why = "photos") {
   // This filing's own failing checks (the workbook's may include periods merged in from earlier filings).
   const fails = (v?.failing || (res?.checks || []).filter((c) => c.status === "FAIL")).slice(0, 4).map((c) => `- ${c.period}: ${c.check}${
     c.note ? ` (${c.note})` : c.difference != null ? ` (off by ${Number(c.difference).toLocaleString()} '000)` : ""}`);
+  return { v, pages, pagesArg, fails, model: res?.meta?.model || state.ai };
+}
+
+// Which filing, where, and the user's own rules for it: the lines every Claude message carries.
+function filingLines(a, { company = true } = {}) {
+  const j = a.job;
+  const used = (j.scan || j.result)?.scan?.used_url;
+  const rule = cogsRuleFor(a);
+  const std = standardFor(a);
+  return [
+    rule ? `My cost of goods sold rule for this company (pass it to open_filing and submit_statements as cogs_rule): ${JSON.stringify(rule)}` : "",
+    std?.token ? `Write it in my own standard “${std.name}”: pass this token unchanged as standard to open_filing, extract_filing and submit_statements: ${std.token}` : "",
+    company ? `Company: ${nameCase(a.issuer) || "?"}${a.stock_code ? ` (${a.stock_code})` : ""}` : "",
+    a.title ? `Filing: ${shortTitle(a.title)}` : "",
+    `Announcement: ${a.url}`,
+    used && used !== a.url ? `Results PDF: ${used}` : "",
+  ].filter(Boolean);
+}
+
+// What Claude is asked, by why: "photos" (statements that are pictures), "recheck" (the server's AI read
+// it but the figures aren't verified), "skipped" (set aside without AI, e.g. slides only), "failed".
+function claudePrompt(a, why = "photos") {
+  const j = a.job;
+  const { v, pagesArg, fails, model } = recheckInfo(a);
   const ask = {
     photos: "Use the SGX Financials connector to read this SGX results filing. Its financial statements are photos/scans, "
       + "so read the page images yourself (open_filing, then submit_statements), re-read any lines whose checks fail, "
       + "and give me the Excel download link.",
-    recheck: `Use the SGX Financials connector to re-check this SGX results filing. ${res?.meta?.model || state.ai} read it, `
+    recheck: `Use the SGX Financials connector to re-check this SGX results filing. ${model} read it, `
       + `but the figures are NOT verified: ${(v?.reasons || []).join("; ")}.${fails.length ? `\nFailing checks:\n${fails.join("\n")}` : ""}\n`
       + `Read the statements yourself: open_filing with as_images=true${pagesArg}, then submit_statements. Re-read any lines `
       + "whose checks fail, don't leave gross profit blank (judge the gross expense when none is printed), and give me the "
@@ -1330,23 +1359,77 @@ function claudePrompt(a, why = "photos") {
     failed: `Use the SGX Financials connector to read this SGX results filing; the app couldn't (${j.error || "it failed"}). `
       + "Open it with open_filing (as_images=true to read the pages yourself), then submit_statements, and give me the Excel download link.",
   }[why] || "";
-  const rule = cogsRuleFor(a);
-  const std = standardFor(a);
-  return [
-    ask,
-    rule ? `My cost of goods sold rule for this company (pass it to open_filing and submit_statements as cogs_rule): ${JSON.stringify(rule)}` : "",
-    std?.token ? `Write it in my own standard “${std.name}”: pass this token unchanged as standard to open_filing, extract_filing and submit_statements: ${std.token}` : "",
-    `Company: ${nameCase(a.issuer) || "?"}${a.stock_code ? ` (${a.stock_code})` : ""}`,
-    a.title ? `Filing: ${shortTitle(a.title)}` : "",
-    `Announcement: ${a.url}`,
-    used && used !== a.url ? `Results PDF: ${used}` : "",
-  ].filter(Boolean).join("\n");
+  return [ask, ...filingLines(a)].filter(Boolean).join("\n");
 }
-function openClaudeChat(a, why = "photos") {
-  const url = `https://claude.ai/new?q=${encodeURIComponent(claudePrompt(a, why))}`;
-  const win = window.open(url, "_blank");
+
+const claudeUrl = (text) => `https://claude.ai/new?q=${encodeURIComponent(text)}`;
+
+// Opens a new Claude chat with the message typed in; false when the browser blocked the tab.
+function openClaudeUrl(text) {
+  const win = window.open(claudeUrl(text), "_blank");
   if (win) win.opener = null;
   else toast("Your browser blocked the Claude tab: allow pop-ups for this site, then click the Claude button again");
+  return Boolean(win);
+}
+function openClaudeChat(a, why = "photos") {
+  return openClaudeUrl(claudePrompt(a, why));
+}
+
+// ------------------------------------------------------------------ every unverified filing to Claude at once
+// After Extract all, the filings whose figures aren't verified go to Claude together (the button beside
+// Download all). A few per chat: each re-check reads its statement pages as images, so a long list would
+// run a chat out of room, and a browser opens one new tab per click. The next click sends the next few.
+const CLAUDE_BATCH = 4;
+const CLAUDE_URL_MAX = 12000; // characters of the prefilled chat link
+
+const toRecheck = () => state.items.filter((a) => a.job.status === "done" && a.url && !a.job.sentToClaude
+  && a.job.result && !verdictOf(a.job.result).ok);
+
+function batchPrompt(list) {
+  const blocks = list.map((a, n) => {
+    const { v, pages, pagesArg, fails, model } = recheckInfo(a);
+    return [
+      `${n + 1}. ${nameCase(a.issuer) || "?"}${a.stock_code ? ` (${a.stock_code})` : ""}`,
+      `Read by ${model}; not verified: ${(v?.reasons || []).join("; ")}.`,
+      fails.length ? `Failing checks:\n${fails.join("\n")}` : "",
+      `open_filing: as_images=true${pagesArg ? `, pages=[${pages.join(", ")}]` : ""}`,
+      ...filingLines(a, { company: false }),
+    ].filter(Boolean).join("\n");
+  });
+  return [
+    `Use the SGX Financials connector to re-check these ${list.length} SGX results filings. The app's AI read them, but `
+      + "their figures are NOT verified; each one's failing checks are listed under it.",
+    "Work through them one at a time. For each, read the statements yourself (open_filing as given, then submit_statements), "
+      + "re-read any lines whose checks fail, don't leave gross profit blank (judge the gross expense when none is printed), "
+      + "and give me that filing's Excel download link before you start the next. Don't use extract_filing: that is the "
+      + "reading that failed. If a filing has no formal financial statements (only a presentation), say so and go on.",
+    "Finish with a short list: company, verified or not, Excel link.",
+    "",
+    blocks.join("\n\n"),
+  ].join("\n");
+}
+
+// The filings the next chat takes: up to CLAUDE_BATCH, while the chat link stays a sensible length.
+function nextBatch() {
+  const all = toRecheck(), list = [];
+  for (const a of all) {
+    if (list.length >= CLAUDE_BATCH) break;
+    if (list.length && claudeUrl(batchPrompt([...list, a])).length > CLAUDE_URL_MAX) break;
+    list.push(a);
+  }
+  return { list, left: all.length };
+}
+
+function recheckAllWithClaude() {
+  const { list, left } = nextBatch();
+  if (!list.length || !openClaudeUrl(batchPrompt(list))) return; // inside the click, so the tab isn't blocked
+  for (const a of list) {
+    a.job.sentToClaude = true;
+    renderCard(a);
+  }
+  const more = left - list.length;
+  toast(`${list.length} filing${list.length === 1 ? "" : "s"} sent to Claude: the Excel links arrive in the chat.${
+    more ? ` ${more} more: click the button again for the next chat.` : ""}`);
 }
 
 function askReader(a) {
@@ -1449,6 +1532,7 @@ $("#bulk").addEventListener("click", async (e) => {
     downloadAll();
   }
   if (b?.id === "bulkStop" && state.bulk) { state.bulk.stop = true; renderBulk(); }
+  if (b?.id === "bulkClaude") recheckAllWithClaude();
 });
 $("#results").addEventListener("click", async (e) => {
   const b = e.target.closest("button");
