@@ -170,6 +170,14 @@ const keepAttachments = (files) => Array.isArray(files)
   ? files.filter((f) => !EXCLUDED_ATTACHMENT.test(`${f.name || ""} ${fileOf(f.url || "")}`))
   : files;
 
+// Cards with no PDFs left (none listed, or only releases / slides / highlights) are not shown.
+// Ones already extracted stay. Returns the items kept; state.noPdf counts the ones left out.
+function dropEmpty(items) {
+  const keep = items.filter((a) => !(Array.isArray(a.attachments) && !a.attachments.length && a.job?.status !== "done"));
+  state.noPdf = items.length - keep.length;
+  return keep;
+}
+
 // The PDFs in the announcement's attachment list, each linked. Once extracted, the one that held
 // the financial statements is shown first and marked; the rest (releases, slides) are listed after.
 function filesLine(a) {
@@ -339,7 +347,8 @@ function renderCards() {
   if (state.range !== undefined) {
     $("#annNote").textContent = [`${nResults} results filing${nResults === 1 ? "" : "s"}`,
       nRelease && `${nRelease} release date${nRelease === 1 ? "" : "s"}`, nOther && `${nOther} other`,
-      hidden.length && `${hidden.length} from bond issuers left out`, state.range].filter(Boolean).join(" · ");
+      hidden.length && `${hidden.length} from bond issuers left out`,
+      state.noPdf && `${state.noPdf} without a financial statements PDF left out`, state.range].filter(Boolean).join(" · ");
     $("#annNote").title = hidden.length ? `Not listed companies on SGX (bonds, notes only): ${[...new Set(hidden.map((h) => h.issuer))].join(", ")}` : "";
   }
   if (!list.length) {
@@ -428,7 +437,7 @@ async function screen(ev) {
       try { res = await api(`${route}&${q}`); break; } catch (e) { err = e; if (e.auth) break; }
     }
     if (!res) throw err;
-    state.items = res.announcements.map((a) => ({ ...a, attachments: keepAttachments(a.attachments), kind: a.kind || "results", key: a.url, job: { status: "idle" } }));
+    state.items = dropEmpty(res.announcements.map((a) => ({ ...a, attachments: keepAttachments(a.attachments), kind: a.kind || "results", key: a.url, job: { status: "idle" } })));
     markDuplicates(state.items);
     state.animate = true;
     state.debug = res.debug || null;
@@ -503,7 +512,7 @@ async function restoreScreen() {
   const saved = await idb("readonly", (st) => st.get(SCREEN_KEY));
   state.restored = true;
   if (!saved?.items?.length || state.items.length || $("#screenBtn").disabled) return; // a new screen has started
-  state.items = saved.items.map((a) => ({ ...a, attachments: keepAttachments(a.attachments), job: { ...a.job, blobUrl: a.job.blob ? URL.createObjectURL(a.job.blob) : undefined } }));
+  state.items = dropEmpty(saved.items.map((a) => ({ ...a, attachments: keepAttachments(a.attachments), job: { ...a.job, blobUrl: a.job.blob ? URL.createObjectURL(a.job.blob) : undefined } })));
   Object.assign(state, { range: saved.range ?? "", debug: saved.debug || null });
   if (saved.from) $("#from").value = saved.from;
   if (saved.to) $("#to").value = saved.to;
