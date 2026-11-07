@@ -107,8 +107,10 @@ def install_mocks():
     def extract(pdf, pages, **kw):
         time.sleep(2.5)
         data = json.loads(json.dumps({**FAKE, "notes": "Mock extraction from the sample PDF; figures are illustrative."}))
-        if "F13" in pdf.name:  # total assets misread by 300: two checks fail, on the second look too
-            data["balance_sheet"]["rows"][2]["values"][0] += 300
+        if "F13" in pdf.name:  # two subtotals misread: NCA + CA = Total Assets fails, on the second look too
+            for r in data["balance_sheet"]["rows"]:
+                if r["key"] in ("total_nca", "total_ca"):
+                    r["values"][0] += 300
         code = pdf.name.split("_")[0]
         data["industry"] = {"D05": "bank", "U11": "bank", "Z74": "technology", "C6L": "transport", "5JK": "property",
                             "NVA": "property", "ABA": "trading"}.get(code, "manufacturing")

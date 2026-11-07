@@ -74,6 +74,8 @@ export const CHAPTERS = [
         body: "Runs every results filing on the list, two at a time. Stop it whenever you like: finished workbooks are kept." },
       { id: "download-all", target: "download-all", title: "Download all",
         body: "Saves every finished workbook into your folder, or as one zip when there’s no folder." },
+      { id: "recheck-all", target: "recheck-all", title: "Re-check the rest with Claude",
+        body: "Filings whose figures aren’t verified go to Claude together: one chat reads up to four of them through the SGX Financials connector and replies with an Excel link for each. Click again for the next four." },
     ],
   },
   {
